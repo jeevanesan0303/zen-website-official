@@ -1,7 +1,7 @@
 
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "zencafe-website",
+  "name": "zen-website-official",
   "main": "./worker/index.ts",
   "compatibility_date": "2026-10-27",
   "compatibility_flags": [
