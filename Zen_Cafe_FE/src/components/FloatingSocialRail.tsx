@@ -12,7 +12,7 @@ import {
 import './FloatingSocialRail.css'
 
 const INSTAGRAM_URL =
-  'https://www.instagram.com/_zen___cafe?igsi=MXhrZmJjeWtkc2VpMQ=='
+  'https://www.instagram.com/zen.srilanka?xtok=Z2JoNzQ2ZGZzYjc='
 
 const WHATSAPP_URL = 'https://wa.me/94705175174'
 
