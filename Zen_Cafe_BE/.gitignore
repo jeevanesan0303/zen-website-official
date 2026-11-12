@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+
+# Local environment & secrets (keep the example)
+.env
+.env.*
+!.env.example
+
+# Logs / OS
+*.log
+.DS_Store
+Thumbs.db
+
+# Database backups contain real customer data — never commit them
+backups/

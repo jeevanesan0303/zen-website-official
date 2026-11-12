@@ -1,0 +1,10 @@
+{
+  "name": "zen-cafe-local-workspace",
+  "private": true,
+  "description": "Local helper only (not part of either repo). Zen_Cafe_FE and Zen_Cafe_BE are independent projects.",
+  "type": "module",
+  "scripts": {
+    "install:all": "npm install --prefix Zen_Cafe_BE && npm install --prefix Zen_Cafe_FE",
+    "dev": "node dev.mjs"
+  }
+}

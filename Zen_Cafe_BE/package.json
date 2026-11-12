@@ -1,0 +1,22 @@
+{
+  "name": "zen-cafe-be",
+  "private": true,
+  "version": "150.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch-path=server --watch-path=server.mjs server.mjs",
+    "start": "node server.mjs",
+    "test": "node scripts/run-tests.mjs",
+    "db:schema": "node scripts/apply-schema.mjs",
+    "db:migrate": "node server/migrate.mjs",
+    "db:seed": "node scripts/seed-local-data.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.9",
+    "pg": "^8.23.1",
+    "pg-mem": "^3.0.14"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
+  }
+}
