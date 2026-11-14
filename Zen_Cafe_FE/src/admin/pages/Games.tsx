@@ -22,9 +22,6 @@ import {
   Sparkles,
   Trophy,
   UtensilsCrossed,
-  LockKeyhole,
-  CheckCircle2,
-  Info,
 } from 'lucide-react'
 
 import {
@@ -46,26 +43,6 @@ import AdminAlert from '../utils/sweetAlert'
 
 /* ==========================================
    ZEN CAFÉ — GAMES & REWARDS
-
-   IMPORTANT GAME RULE
-
-   scratchCount means the number of FULLY
-   COMPLETED scratch-card attempts.
-
-   It does NOT mean:
-   - Finger movements
-   - Mouse movements
-   - Scratch gestures
-   - Percentage scratched on one card
-
-   Example:
-   scratchCount = 25
-
-   Customer completes 25 separate scratch
-   cards before the final result is revealed.
-
-   The customer game and backend must enforce
-   the same rule.
 ========================================== */
 
 type Props = {
@@ -85,9 +62,9 @@ type ScratchGameConfig = GameConfig & {
 const TOTAL_CARDS = 5
 const REQUIRED_WINNERS = 2
 
-const DEFAULT_REQUIRED_ATTEMPTS = 25
-const MIN_REQUIRED_ATTEMPTS = 1
-const MAX_REQUIRED_ATTEMPTS = 100
+const DEFAULT_SCRATCH_COUNT = 25
+const MIN_SCRATCH_COUNT = 5
+const MAX_SCRATCH_COUNT = 100
 
 const CARD_IMAGES = [
   '/assets/Game/Card/game-1.png.png',
@@ -129,61 +106,24 @@ const descriptionStyle: CSSProperties = {
   color: COLORS.text,
 }
 
-const primaryButtonBase: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: 9,
-  padding: '13px 20px',
-  border: 0,
-  borderRadius: 12,
-  color: '#FFFFFF',
-  fontSize: 14,
-  fontWeight: 700,
-  transition: 'all 0.2s ease',
-}
-
-const counterButtonStyle: CSSProperties = {
-  width: 40,
-  height: 40,
-  borderRadius: 10,
-  border: '1px solid #DDC9E3',
-  background: '#FFFFFF',
-  color: COLORS.heading,
-  display: 'grid',
-  placeItems: 'center',
-  cursor: 'pointer',
-}
-
-function normalizeAttempts(value: unknown): number {
-  const number =
-    typeof value === 'number'
-      ? value
-      : typeof value === 'string' &&
-          value.trim() !== ''
-        ? Number(value)
-        : NaN
-
+function normalizeScratchCount(value: unknown): number {
   if (
-    !Number.isInteger(number) ||
-    number < MIN_REQUIRED_ATTEMPTS ||
-    number > MAX_REQUIRED_ATTEMPTS
+    typeof value !== 'number' ||
+    !Number.isInteger(value) ||
+    value < MIN_SCRATCH_COUNT ||
+    value > MAX_SCRATCH_COUNT
   ) {
-    return DEFAULT_REQUIRED_ATTEMPTS
+    return DEFAULT_SCRATCH_COUNT
   }
 
-  return number
+  return value
 }
 
-function getRequiredAttempts(
-  config: GameConfig
-): number {
-  return normalizeAttempts(
-    (
-      config as GameConfig & {
-        scratchCount?: unknown
-      }
-    ).scratchCount
+function getScratchCount(config: GameConfig): number {
+  return normalizeScratchCount(
+    (config as GameConfig & {
+      scratchCount?: unknown
+    }).scratchCount
   )
 }
 
@@ -236,45 +176,41 @@ function productToPrize(
   }
 }
 
-function formatAttemptLabel(
-  count: number
-): string {
-  return `${count} ${
-    count === 1 ? 'attempt' : 'attempts'
-  }`
-}
+/* ==========================================
+   ADMIN GAMES COMPONENT
+========================================== */
 
 export default function Games({
   query: _query = '',
 }: Props) {
+  const initialConfig = readGameConfig()
+
   const [savedConfig, setSavedConfig] =
     useState<GameConfig>(() => readGameConfig())
 
-  const [products, setProducts] = useState<
-    ScratchRewardProduct[]
-  >(() => getScratchRewardProducts())
+  const [products, setProducts] =
+    useState<ScratchRewardProduct[]>(
+      () => getScratchRewardProducts()
+    )
 
-  const [cards, setCards] = useState<CardDraft[]>(
-    () =>
+  const [cards, setCards] =
+    useState<CardDraft[]>(() =>
       configToDraft(
         readGameConfig(),
         getScratchRewardProducts()
       )
-  )
+    )
 
   const [enabled, setEnabled] = useState(
-    () => readGameConfig().enabled
+    initialConfig.enabled
   )
 
-  const [
-    requiredAttempts,
-    setRequiredAttempts,
-  ] = useState<number>(
-    () => getRequiredAttempts(readGameConfig())
-  )
+  const [scratchCount, setScratchCount] =
+    useState<number>(
+      () => getScratchCount(readGameConfig())
+    )
 
   const [saving, setSaving] = useState(false)
-
   const savingRef = useRef(false)
 
   /* ==========================================
@@ -295,17 +231,11 @@ export default function Games({
         setSavedConfig(config)
 
         setCards(
-          configToDraft(
-            config,
-            latestProducts
-          )
+          configToDraft(config, latestProducts)
         )
 
         setEnabled(config.enabled)
-
-        setRequiredAttempts(
-          getRequiredAttempts(config)
-        )
+        setScratchCount(getScratchCount(config))
       })
       .catch(error => {
         console.warn(
@@ -314,15 +244,11 @@ export default function Games({
         )
       })
 
-    const unsubscribe = subscribeGameConfig(
-      () => {
-        if (!mounted || savingRef.current) {
-          return
-        }
+    const unsubscribe = subscribeGameConfig(() => {
+      if (!mounted || savingRef.current) return
 
-        setSavedConfig(readGameConfig())
-      }
-    )
+      setSavedConfig(readGameConfig())
+    })
 
     return () => {
       mounted = false
@@ -331,7 +257,7 @@ export default function Games({
   }, [])
 
   /* ==========================================
-     MENU PRODUCT SUBSCRIPTION
+     MENU PRODUCTS SUBSCRIPTION
   ========================================== */
 
   useEffect(() => {
@@ -354,9 +280,7 @@ export default function Games({
   )
 
   const winningCount = winningCards.length
-
-  const losingCount =
-    TOTAL_CARDS - winningCount
+  const losingCount = TOTAL_CARDS - winningCount
 
   const missingPrizeCards = useMemo(
     () =>
@@ -370,8 +294,8 @@ export default function Games({
     [winningCards, products]
   )
 
-  const savedRequiredAttempts =
-    getRequiredAttempts(savedConfig)
+  const savedScratchCount =
+    getScratchCount(savedConfig)
 
   const hasChanges = useMemo(() => {
     if (enabled !== savedConfig.enabled) {
@@ -379,8 +303,8 @@ export default function Games({
     }
 
     if (
-      requiredAttempts !==
-      getRequiredAttempts(savedConfig)
+      scratchCount !==
+      getScratchCount(savedConfig)
     ) {
       return true
     }
@@ -398,37 +322,37 @@ export default function Games({
 
       return (
         card.winning !== savedWinning ||
-        (card.winning &&
-          card.productId !== savedProductId)
+        (
+          card.winning &&
+          card.productId !== savedProductId
+        )
       )
     })
   }, [
     cards,
     enabled,
-    requiredAttempts,
+    scratchCount,
     savedConfig,
   ])
 
   /* ==========================================
-     REQUIRED COMPLETED ATTEMPTS
+     SCRATCH COUNT CONTROL
   ========================================== */
 
-  function updateRequiredAttempts(
-    value: number
-  ) {
+  function updateScratchCount(value: number) {
     if (savingRef.current) return
 
     if (!Number.isFinite(value)) return
 
     const next = Math.max(
-      MIN_REQUIRED_ATTEMPTS,
+      MIN_SCRATCH_COUNT,
       Math.min(
-        MAX_REQUIRED_ATTEMPTS,
+        MAX_SCRATCH_COUNT,
         Math.round(value)
       )
     )
 
-    setRequiredAttempts(next)
+    setScratchCount(next)
   }
 
   /* ==========================================
@@ -496,23 +420,19 @@ export default function Games({
     if (savingRef.current) return
 
     const config = savedConfig
-
     const latestProducts =
       getScratchRewardProducts()
 
     setProducts(latestProducts)
 
     setCards(
-      configToDraft(
-        config,
-        latestProducts
-      )
+      configToDraft(config, latestProducts)
     )
 
     setEnabled(config.enabled)
 
-    setRequiredAttempts(
-      getRequiredAttempts(config)
+    setScratchCount(
+      getScratchCount(config)
     )
   }
 
@@ -521,13 +441,9 @@ export default function Games({
   ========================================== */
 
   async function handleSave() {
-    if (savingRef.current || !hasChanges) {
-      return
-    }
+    if (savingRef.current) return
 
-    if (
-      winningCount !== REQUIRED_WINNERS
-    ) {
+    if (winningCount !== REQUIRED_WINNERS) {
       await AdminAlert.warning(
         'Invalid Winning Cards',
         'Please select exactly two winning cards out of five before saving.'
@@ -548,15 +464,13 @@ export default function Games({
     }
 
     if (
-      !Number.isInteger(requiredAttempts) ||
-      requiredAttempts <
-        MIN_REQUIRED_ATTEMPTS ||
-      requiredAttempts >
-        MAX_REQUIRED_ATTEMPTS
+      !Number.isInteger(scratchCount) ||
+      scratchCount < MIN_SCRATCH_COUNT ||
+      scratchCount > MAX_SCRATCH_COUNT
     ) {
       await AdminAlert.warning(
-        'Invalid Attempt Count',
-        `Enter a number between ${MIN_REQUIRED_ATTEMPTS} and ${MAX_REQUIRED_ATTEMPTS}.`
+        'Invalid Scratch Count',
+        `Enter a number between ${MIN_SCRATCH_COUNT} and ${MAX_SCRATCH_COUNT}.`
       )
       return
     }
@@ -565,12 +479,11 @@ export default function Games({
     setSaving(true)
 
     try {
-      const confirmed =
-        await AdminAlert.confirm(
-          'Save Games & Rewards?',
-          `Save the five scratch cards, selected rewards, and ${requiredAttempts} required completed scratch-card attempts? The final result must remain locked until the customer finishes all ${requiredAttempts} cards.`,
-          'Yes, Save Changes'
-        )
+      const confirmed = await AdminAlert.confirm(
+        'Save Games & Rewards?',
+        `Save the five scratch cards, selected rewards, and ${scratchCount} required scratches?`,
+        'Yes, Save Changes'
+      )
 
       if (!confirmed) return
 
@@ -601,26 +514,20 @@ export default function Games({
         }
       })
 
-      /*
-       * Keep scratchCount for compatibility
-       * with the existing gameStore/API.
-       *
-       * Its intended meaning is now the
-       * number of completed scratch cards.
-       */
-
       const nextConfig: ScratchGameConfig = {
         enabled,
-        scratchCount: requiredAttempts,
+        scratchCount,
         cards: nextCards,
       }
 
       await saveGameConfig(nextConfig)
 
       /*
-       * Verify persistence through the API.
-       * This does NOT verify that the customer
-       * game enforces completed attempts.
+       * The gameStore and backend must also
+       * preserve scratchCount.
+       *
+       * Do not report a successful persistent
+       * save unless the API supports this field.
        */
 
       const verifyResponse = await fetch(
@@ -639,19 +546,18 @@ export default function Games({
         )
       }
 
-      const verifyData =
-        await verifyResponse.json()
+      const verifyData = await verifyResponse.json()
 
       const verifiedConfig =
         verifyData.config ??
         verifyData
 
       if (
-        Number(verifiedConfig.scratchCount) !==
-        requiredAttempts
+        verifiedConfig.scratchCount !==
+        scratchCount
       ) {
         throw new Error(
-          'The Games API did not preserve the required attempt count. Update /api/games/settings and gameStore to persist scratchCount correctly.'
+          'The game API has not saved the scratch count. Update the backend /api/games/settings endpoint to support scratchCount before using this setting.'
         )
       }
 
@@ -660,7 +566,7 @@ export default function Games({
 
       await AdminAlert.success(
         'Game Settings Saved',
-        `The required completed-attempt setting is saved as ${requiredAttempts}. The customer game and backend must enforce the final reward reveal after ${requiredAttempts} fully completed scratch cards.`
+        `Your game settings have been saved. Customers must complete ${scratchCount} scratches to reveal their result.`
       )
     } catch (error) {
       console.error(
@@ -681,25 +587,32 @@ export default function Games({
   }
 
   /* ==========================================
-     BUTTON STYLES
+     SHARED BUTTON STYLE
   ========================================== */
 
   const saveButtonStyle: CSSProperties = {
-    ...primaryButtonBase,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 9,
+    padding: '13px 20px',
+    border: 0,
+    borderRadius: 12,
     background: saving
       ? '#C7B9B9'
       : COLORS.primary,
-    cursor:
-      saving || !hasChanges
-        ? 'not-allowed'
-        : 'pointer',
-    opacity:
-      saving || !hasChanges
-        ? 0.55
-        : 1,
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: 700,
+    cursor: saving
+      ? 'not-allowed'
+      : 'pointer',
+    opacity: saving ? 0.7 : 1,
   }
 
-  const progressPreview = 0
+  /* ==========================================
+     RENDER
+  ========================================== */
 
   return (
     <div
@@ -709,9 +622,7 @@ export default function Games({
         paddingBottom: 36,
       }}
     >
-      {/* =====================================
-          PAGE HEADER
-      ===================================== */}
+      {/* PAGE HEADER */}
 
       <div
         style={{
@@ -750,15 +661,15 @@ export default function Games({
 
           <p style={descriptionStyle}>
             Manage scratch cards, winning
-            positions, customer rewards, and
-            completed scratch-card requirements.
+            positions, customer rewards,
+            and scratch requirements.
           </p>
         </div>
 
         <button
           type="button"
           onClick={() => void handleSave()}
-          disabled={saving || !hasChanges}
+          disabled={saving}
           style={saveButtonStyle}
         >
           <Save size={18} />
@@ -768,9 +679,7 @@ export default function Games({
         </button>
       </div>
 
-      {/* =====================================
-          SUMMARY CARDS
-      ===================================== */}
+      {/* SUMMARY CARDS */}
 
       <div
         style={{
@@ -802,8 +711,8 @@ export default function Games({
             icon: Gift,
           },
           {
-            label: 'Required Attempts',
-            value: requiredAttempts,
+            label: 'Required Scratches',
+            value: scratchCount,
             icon: Hand,
           },
         ].map(stat => {
@@ -847,9 +756,7 @@ export default function Games({
         })}
       </div>
 
-      {/* =====================================
-          GAME STATUS
-      ===================================== */}
+      {/* GAME STATUS */}
 
       <section style={sectionStyle}>
         <div
@@ -901,9 +808,7 @@ export default function Games({
               display: 'flex',
               alignItems: 'center',
               gap: 10,
-              cursor: saving
-                ? 'not-allowed'
-                : 'pointer',
+              cursor: 'pointer',
               fontWeight: 700,
               color: enabled
                 ? '#24734D'
@@ -933,9 +838,7 @@ export default function Games({
         </div>
       </section>
 
-      {/* =====================================
-          COMPLETED ATTEMPT SETTINGS
-      ===================================== */}
+      {/* SCRATCH COUNT CONFIGURATION */}
 
       <section style={sectionStyle}>
         <div
@@ -965,14 +868,13 @@ export default function Games({
 
           <div>
             <h2 style={headingStyle}>
-              Scratch Attempt Settings
+              Scratch Count Settings
             </h2>
 
             <p style={descriptionStyle}>
-              Set how many complete scratch
-              cards a customer must finish
-              before their final reward is
-              revealed.
+              Choose how many complete scratch
+              gestures a customer must perform
+              before the prize is revealed.
             </p>
           </div>
         </div>
@@ -987,8 +889,6 @@ export default function Games({
             gap: 20,
           }}
         >
-          {/* COUNT CONTROL */}
-
           <div
             style={{
               display: 'flex',
@@ -1006,11 +906,11 @@ export default function Games({
                   color: COLORS.heading,
                 }}
               >
-                Required Completed Attempts
+                Required Scratches
               </div>
 
               <p style={descriptionStyle}>
-                Default: 25 complete scratch cards
+                Default: 25 scratches
               </p>
             </div>
 
@@ -1025,45 +925,51 @@ export default function Games({
                 type="button"
                 disabled={
                   saving ||
-                  requiredAttempts <=
-                    MIN_REQUIRED_ATTEMPTS
+                  scratchCount <= MIN_SCRATCH_COUNT
                 }
                 onClick={() =>
-                  updateRequiredAttempts(
-                    requiredAttempts - 1
+                  updateScratchCount(
+                    scratchCount - 1
                   )
                 }
-                aria-label="Decrease required attempts"
-                style={counterButtonStyle}
+                aria-label="Decrease scratch count"
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 10,
+                  border: '1px solid #DDC9E3',
+                  background: '#FFFFFF',
+                  color: COLORS.heading,
+                  cursor: 'pointer',
+                  display: 'grid',
+                  placeItems: 'center',
+                }}
               >
                 <Minus size={18} />
               </button>
 
               <input
                 type="number"
-                min={MIN_REQUIRED_ATTEMPTS}
-                max={MAX_REQUIRED_ATTEMPTS}
+                min={MIN_SCRATCH_COUNT}
+                max={MAX_SCRATCH_COUNT}
                 step={1}
-                value={requiredAttempts}
+                value={scratchCount}
                 disabled={saving}
                 onChange={event => {
                   const value =
                     event.target.valueAsNumber
 
-                  if (
-                    Number.isFinite(value)
-                  ) {
-                    updateRequiredAttempts(value)
+                  if (!Number.isNaN(value)) {
+                    updateScratchCount(value)
                   }
                 }}
-                aria-label="Required completed scratch-card attempts"
+                aria-label="Required scratch count"
                 style={{
                   width: 82,
                   height: 44,
                   textAlign: 'center',
                   borderRadius: 10,
-                  border:
-                    '1px solid #DDC9E3',
+                  border: '1px solid #DDC9E3',
                   background: '#FFFFFF',
                   fontSize: 23,
                   fontWeight: 800,
@@ -1075,37 +981,44 @@ export default function Games({
                 type="button"
                 disabled={
                   saving ||
-                  requiredAttempts >=
-                    MAX_REQUIRED_ATTEMPTS
+                  scratchCount >= MAX_SCRATCH_COUNT
                 }
                 onClick={() =>
-                  updateRequiredAttempts(
-                    requiredAttempts + 1
+                  updateScratchCount(
+                    scratchCount + 1
                   )
                 }
-                aria-label="Increase required attempts"
-                style={counterButtonStyle}
+                aria-label="Increase scratch count"
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 10,
+                  border: '1px solid #DDC9E3',
+                  background: '#FFFFFF',
+                  color: COLORS.heading,
+                  cursor: 'pointer',
+                  display: 'grid',
+                  placeItems: 'center',
+                }}
               >
                 <Plus size={18} />
               </button>
             </div>
           </div>
 
-          {/* RANGE SLIDER */}
-
           <input
             type="range"
-            min={MIN_REQUIRED_ATTEMPTS}
-            max={MAX_REQUIRED_ATTEMPTS}
+            min={MIN_SCRATCH_COUNT}
+            max={MAX_SCRATCH_COUNT}
             step={1}
-            value={requiredAttempts}
+            value={scratchCount}
             disabled={saving}
             onChange={event =>
-              updateRequiredAttempts(
+              updateScratchCount(
                 Number(event.target.value)
               )
             }
-            aria-label="Adjust required completed attempts"
+            aria-label="Adjust required scratches"
             style={{
               width: '100%',
               accentColor: COLORS.primary,
@@ -1121,39 +1034,25 @@ export default function Games({
               color: COLORS.text,
             }}
           >
-            <span>
-              {formatAttemptLabel(
-                MIN_REQUIRED_ATTEMPTS
-              )}
-            </span>
-
-            <span>
-              {formatAttemptLabel(
-                MAX_REQUIRED_ATTEMPTS
-              )}
-            </span>
+            <span>{MIN_SCRATCH_COUNT} scratches</span>
+            <span>{MAX_SCRATCH_COUNT} scratches</span>
           </div>
-
-          {/* CUSTOMER PROGRESS PREVIEW */}
 
           <div
             style={{
               background: '#FFFFFF',
               border: '1px solid #EADCEF',
               borderRadius: 12,
-              padding: 16,
-              display: 'grid',
-              gap: 12,
+              padding: 15,
             }}
           >
             <div
               style={{
                 display: 'flex',
-                justifyContent:
-                  'space-between',
+                justifyContent: 'space-between',
                 alignItems: 'center',
-                flexWrap: 'wrap',
                 gap: 10,
+                marginBottom: 12,
               }}
             >
               <strong
@@ -1162,25 +1061,24 @@ export default function Games({
                   color: COLORS.heading,
                 }}
               >
-                Customer Attempt Progress Preview
+                Customer Scratch Counter
               </strong>
 
               <span
                 style={{
-                  fontSize: 14,
+                  fontSize: 13,
                   fontWeight: 800,
                   color: COLORS.primary,
                 }}
               >
-                {progressPreview} /{' '}
-                {requiredAttempts}
+                0 / {scratchCount}
               </span>
             </div>
 
             <div
               style={{
                 width: '100%',
-                height: 10,
+                height: 9,
                 background: '#EFE4F1',
                 borderRadius: 20,
                 overflow: 'hidden',
@@ -1188,194 +1086,45 @@ export default function Games({
             >
               <div
                 style={{
-                  width: `${
-                    (progressPreview /
-                      requiredAttempts) *
-                    100
-                  }%`,
+                  width: '0%',
                   height: '100%',
                   background: COLORS.primary,
-                  transition: 'width 0.3s ease',
                 }}
               />
-            </div>
-
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                color: '#875A68',
-                fontSize: 13,
-                fontWeight: 600,
-              }}
-            >
-              <LockKeyhole size={17} />
-
-              Final reward locked until all{' '}
-              {requiredAttempts} attempts
-              are completed.
             </div>
 
             <p
               style={{
                 ...descriptionStyle,
-                marginTop: 0,
+                marginTop: 11,
               }}
             >
-              Each fully scratched card
-              counts as one completed attempt.
-              Partial scratching and individual
-              finger movements do not increase
-              the attempt counter.
+              The customer will see their reward
+              after completing {scratchCount} valid
+              scratch gestures.
             </p>
           </div>
 
-          {/* EXAMPLE FLOW */}
-
-          <div
-            style={{
-              padding: 16,
-              background: '#FFF9F0',
-              border: '1px solid #F2E2CD',
-              borderRadius: 12,
-              display: 'grid',
-              gap: 12,
-            }}
-          >
-            <strong
-              style={{
-                color: COLORS.heading,
-                fontSize: 14,
-              }}
-            >
-              How the Customer Game Should Work
-            </strong>
-
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns:
-                  'repeat(auto-fit, minmax(150px, 1fr))',
-                gap: 10,
-              }}
-            >
-              {[
-                {
-                  title: 'Attempt 1',
-                  detail:
-                    'Fully scratch the first card',
-                  icon: Hand,
-                },
-                {
-                  title: `Attempts 2–${Math.max(
-                    2,
-                    requiredAttempts - 1
-                  )}`,
-                  detail:
-                    'Continue completing cards',
-                  icon: RefreshCw,
-                },
-                {
-                  title: `Attempt ${requiredAttempts}`,
-                  detail:
-                    'Complete the final card',
-                  icon: CheckCircle2,
-                },
-                {
-                  title: 'Final Reward',
-                  detail:
-                    'Reveal the assigned result',
-                  icon: Gift,
-                },
-              ].map((step, index) => {
-                const Icon = step.icon
-
-                return (
-                  <div
-                    key={index}
-                    style={{
-                      padding: 13,
-                      background: '#FFFFFF',
-                      border:
-                        '1px solid #F0E4D8',
-                      borderRadius: 11,
-                      display: 'grid',
-                      gap: 7,
-                    }}
-                  >
-                    <Icon
-                      size={19}
-                      color={
-                        index === 3
-                          ? COLORS.green
-                          : COLORS.primary
-                      }
-                    />
-
-                    <strong
-                      style={{
-                        fontSize: 13,
-                        color: COLORS.heading,
-                      }}
-                    >
-                      {step.title}
-                    </strong>
-
-                    <span
-                      style={{
-                        fontSize: 12,
-                        lineHeight: 1.5,
-                        color: COLORS.text,
-                      }}
-                    >
-                      {step.detail}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-
-            <p
-              style={{
-                margin: 0,
-                fontSize: 12,
-                color: '#936026',
-              }}
-            >
-              This is an admin explanation,
-              not a live customer progress
-              tracker.
-            </p>
-          </div>
-
-          {/* UNSAVED COUNT WARNING */}
-
-          {requiredAttempts !==
-            savedRequiredAttempts && (
+          {scratchCount !== savedScratchCount && (
             <div
               style={{
                 background: '#FFF3E5',
                 color: '#936026',
                 borderRadius: 10,
-                padding: '11px 13px',
+                padding: '10px 13px',
                 fontSize: 12,
                 fontWeight: 650,
               }}
             >
-              Required completed attempts
-              changed from{' '}
-              {savedRequiredAttempts} to{' '}
-              {requiredAttempts}. Save your
-              changes to apply this setting.
+              Scratch count changed from{' '}
+              {savedScratchCount} to {scratchCount}.
+              Save your changes to apply it.
             </div>
           )}
         </div>
       </section>
 
-      {/* =====================================
-          SELECT WINNING CARDS
-      ===================================== */}
+      {/* SELECT WINNING CARDS */}
 
       <section style={sectionStyle}>
         <div
@@ -1415,8 +1164,7 @@ export default function Games({
               fontWeight: 700,
             }}
           >
-            {winningCount} /{' '}
-            {REQUIRED_WINNERS} Selected
+            {winningCount} / {REQUIRED_WINNERS} Selected
           </span>
         </div>
 
@@ -1520,39 +1268,9 @@ export default function Games({
             </button>
           ))}
         </div>
-
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 9,
-            marginTop: 18,
-            padding: 13,
-            background: '#F8F5F4',
-            borderRadius: 11,
-            color: '#806E70',
-            fontSize: 12,
-            lineHeight: 1.7,
-          }}
-        >
-          <Info
-            size={17}
-            style={{ flexShrink: 0 }}
-          />
-
-          These five cards define the
-          available winning and losing
-          positions. Customers may complete
-          multiple scratch attempts, but
-          the final result must remain
-          hidden until the configured
-          attempt requirement is reached.
-        </div>
       </section>
 
-      {/* =====================================
-          ASSIGN REWARD PRODUCTS
-      ===================================== */}
+      {/* ASSIGN REWARD PRODUCTS */}
 
       <section style={sectionStyle}>
         <div
@@ -1611,8 +1329,7 @@ export default function Games({
               const selectedProduct =
                 products.find(
                   product =>
-                    product.id ===
-                    card.productId
+                    product.id === card.productId
                 )
 
               return (
@@ -1624,8 +1341,7 @@ export default function Games({
                     padding: 18,
                     borderRadius: 13,
                     background: '#FCF8F7',
-                    border:
-                      '1px solid #F0E4E1',
+                    border: '1px solid #F0E4E1',
                   }}
                 >
                   <div
@@ -1663,8 +1379,7 @@ export default function Games({
                       width: '100%',
                       padding: '13px 14px',
                       borderRadius: 10,
-                      border:
-                        '1px solid #DCCBC8',
+                      border: '1px solid #DCCBC8',
                       background: '#FFFFFF',
                       color: COLORS.heading,
                       fontSize: 14,
@@ -1713,9 +1428,8 @@ export default function Games({
                         color: '#B36B33',
                       }}
                     >
-                      Please choose an
-                      available menu product
-                      for this card.
+                      Please choose an available
+                      menu product for this card.
                     </p>
                   )}
                 </div>
@@ -1735,17 +1449,14 @@ export default function Games({
               fontSize: 13,
             }}
           >
-            No available menu products
-            were found. Add or enable
-            products in Menu / Products
-            first.
+            No available menu products were
+            found. Add or enable products in
+            Menu / Products first.
           </p>
         )}
       </section>
 
-      {/* =====================================
-          GAME RULES
-      ===================================== */}
+      {/* GAME RULES */}
 
       <section
         style={{
@@ -1781,7 +1492,7 @@ export default function Games({
         <div
           style={{
             display: 'grid',
-            gap: 15,
+            gap: 13,
             color: '#806D58',
             fontSize: 13,
             lineHeight: 1.7,
@@ -1809,9 +1520,8 @@ export default function Games({
                 marginRight: 7,
               }}
             />
-            Exactly two of the five card
-            positions must contain winning
-            rewards.
+            Exactly two cards must contain
+            winning rewards.
           </div>
 
           <div>
@@ -1824,8 +1534,7 @@ export default function Games({
               }}
             />
             The other three cards display
-            "Good Luck Next Time!" when
-            the final result is revealed.
+            "Good Luck Next Time!"
           </div>
 
           <div>
@@ -1837,40 +1546,9 @@ export default function Games({
                 marginRight: 7,
               }}
             />
-            One completed attempt means
-            one fully scratched card,
-            regardless of how many finger
-            or mouse movements were used.
-          </div>
-
-          <div>
-            <LockKeyhole
-              size={15}
-              style={{
-                display: 'inline',
-                verticalAlign: 'middle',
-                marginRight: 7,
-              }}
-            />
-            The final reward must remain
-            locked until the customer
-            completes all{' '}
-            {requiredAttempts} required
-            attempts.
-          </div>
-
-          <div>
-            <CheckCircle2
-              size={15}
-              style={{
-                display: 'inline',
-                verticalAlign: 'middle',
-                marginRight: 7,
-              }}
-            />
-            A partially scratched card
-            must not count as a completed
-            attempt.
+            Customers must complete the
+            configured number of scratch
+            gestures before revealing the result.
           </div>
 
           <div>
@@ -1882,43 +1560,14 @@ export default function Games({
                 marginRight: 7,
               }}
             />
-            Customer progress and reward
-            eligibility must be verified
-            by the backend. Refreshing
-            the page must not bypass
-            the attempt requirement.
+            Settings are sent to the Games API.
+            Real reward redemption requires
+            server-side verification.
           </div>
         </div>
       </section>
 
-      {/* =====================================
-          UNSAVED CHANGES INDICATOR
-      ===================================== */}
-
-      {hasChanges && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            padding: '13px 16px',
-            borderRadius: 12,
-            background: '#FFF3E5',
-            color: '#936026',
-            fontSize: 13,
-            fontWeight: 650,
-          }}
-        >
-          <Info size={18} />
-          You have unsaved game settings.
-          Save your changes before leaving
-          this page.
-        </div>
-      )}
-
-      {/* =====================================
-          BOTTOM ACTIONS
-      ===================================== */}
+      {/* BOTTOM ACTIONS */}
 
       <div
         style={{
@@ -1938,8 +1587,7 @@ export default function Games({
             gap: 8,
             padding: '12px 18px',
             borderRadius: 11,
-            border:
-              '1px solid #DAC9C6',
+            border: '1px solid #DAC9C6',
             background: '#FFFFFF',
             color: '#704B50',
             cursor:
@@ -1959,7 +1607,7 @@ export default function Games({
         <button
           type="button"
           onClick={() => void handleSave()}
-          disabled={saving || !hasChanges}
+          disabled={saving}
           style={saveButtonStyle}
         >
           <Save size={17} />

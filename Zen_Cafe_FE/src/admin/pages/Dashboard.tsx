@@ -973,9 +973,7 @@ export default function Dashboard({
                       </td>
 
                       <td className="za-price">
-                        {typeof product.price === 'number' && Number.isFinite(product.price)
-                          ? `LKR ${product.price.toLocaleString('en-LK', { maximumFractionDigits: 2 })}`
-                          : '—'}
+                        —
                       </td>
 
                       <td>
