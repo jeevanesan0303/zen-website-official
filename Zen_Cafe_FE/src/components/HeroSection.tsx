@@ -206,9 +206,23 @@ export default function HeroSection(){
 
     {/* Hero copy intentionally never changes when the hidden panda sequence plays. */}
     <div className="video-hero-content">
-      <div className="video-hero-copy-block">
-        <div className="video-hero-brand"><img src="/assets/zen-logo.png" alt="Zen Café logo"/><div><b>ZEN CAFÉ · JAFFNA</b><span>Café · Party room</span></div></div>
-        <p className="video-hero-kicker">A quiet surprise.</p>
+     <div className="video-hero-copy-block">
+
+  <p className="video-hero-kicker">
+    A quiet surprise.
+  </p>
+
+  <div className="video-hero-brand">
+    <img
+      src="/assets/zen-logo.png"
+      alt="Zen Café logo"
+    />
+
+    <div>
+      <b>ZEN CAFÉ · JAFFNA</b>
+      <span>Café · Party room</span>
+    </div>
+  </div>
         
 <div
   className="hero-meet-video-shell"
