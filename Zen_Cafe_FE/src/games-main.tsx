@@ -1,15 +1,14 @@
 
 import * as React from 'react'
 import { createRoot } from 'react-dom/client'
-
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
-
 import {
   ChefHat,
   DoorOpen,
@@ -27,7 +26,6 @@ import {
 
 import ThemeToggle from './components/ThemeToggle'
 import { useSiteTheme } from './theme'
-
 import {
   readGameConfig,
   fetchGameConfig,
@@ -43,15 +41,30 @@ import './games.css'
 
 /* ==========================================
    ZEN CAFÉ — SCRATCH & WIN
+
+   ONE FULLY CLEARED COATING = ONE ATTEMPT
+
+   A reward is revealed only after all
+   required completed attempts.
 ========================================== */
 
 const SCRATCH_WIDTH = 480
 const SCRATCH_HEIGHT = 280
-const BRUSH_SIZE = 46
+const BRUSH_SIZE = 48
 
-// Minimum travel distance for a valid swipe.
-// A simple tap does not count as a scratch.
-const MIN_GESTURE_DISTANCE = 18
+/*
+  Each coating must be at least 75% cleared.
+
+  This measures transparent pixels, not
+  pointer movements or swipe count.
+*/
+const REQUIRED_CLEAR_PERCENT = 75
+
+/*
+  Pixel inspection is relatively expensive.
+  Limit inspections during pointer movement.
+*/
+const COVERAGE_CHECK_INTERVAL_MS = 100
 
 const cards = [
   {
@@ -150,10 +163,6 @@ const confettiColors = [
   '#ffffff',
 ]
 
-/* ==========================================
-   TYPES
-========================================== */
-
 type Point = {
   x: number
   y: number
@@ -186,7 +195,7 @@ type ScratchCardProps = {
 }
 
 /* ==========================================
-   GAME CONFIGURATION HELPERS
+   CONFIGURATION
 ========================================== */
 
 function getRequiredScratches(
@@ -205,13 +214,10 @@ function getRequiredScratches(
   return count
 }
 
-/* ==========================================
-   CARD RESULT
-
-   Preserves existing admin-defined
-   winning card positions.
-========================================== */
-
+/*
+  Preserve the existing admin-defined
+  winning positions.
+*/
 function createResult(
   cardIndex: number,
   config: GameConfig
@@ -222,10 +228,7 @@ function createResult(
     card => card.cardId === cardId
   )
 
-  if (
-    !config.enabled ||
-    !selectedCard?.prize
-  ) {
+  if (!config.enabled || !selectedCard?.prize) {
     return { kind: 'lose' }
   }
 
@@ -241,10 +244,7 @@ function createResult(
 
 function GamingBackground() {
   return (
-    <div
-      className="zg-background"
-      aria-hidden="true"
-    >
+    <div className="zg-background" aria-hidden="true">
       <div className="zg-grid" />
       <div className="zg-orb zg-orb-purple" />
       <div className="zg-orb zg-orb-blue" />
@@ -271,7 +271,7 @@ function GamingBackground() {
         <div className="zg-scene-monitor">
           <div className="zg-monitor-screen">
             <img
-              src={cards[4]!.image}
+              src={cards[4].image}
               alt=""
               draggable={false}
             />
@@ -282,7 +282,7 @@ function GamingBackground() {
 
         <div className="zg-scene-warrior">
           <img
-            src={cards[1]!.image}
+            src={cards[1].image}
             alt=""
             draggable={false}
           />
@@ -299,28 +299,22 @@ function GamingBackground() {
       </div>
 
       <div className="zg-neon-trails">
-        {Array.from(
-          { length: 6 },
-          (_, index) => (
-            <span
-              key={index}
-              className={
-                `zg-neon-trail trail-${index % 3}`
-              }
-              style={{
-                top: `${17 + index * 15}%`,
-                animationDelay:
-                  `${-index * 3.1}s`,
-                animationDuration:
-                  `${15 + index * 1.4}s`,
-                animationDirection:
-                  index % 2
-                    ? 'reverse'
-                    : 'normal',
-              }}
-            />
-          )
-        )}
+        {Array.from({ length: 6 }, (_, index) => (
+          <span
+            key={index}
+            className={
+              `zg-neon-trail trail-${index % 3}`
+            }
+            style={{
+              top: `${17 + index * 15}%`,
+              animationDelay: `${-index * 3.1}s`,
+              animationDuration:
+                `${15 + index * 1.4}s`,
+              animationDirection:
+                index % 2 ? 'reverse' : 'normal',
+            }}
+          />
+        ))}
       </div>
 
       <div className="zg-floating-items">
@@ -331,10 +325,8 @@ function GamingBackground() {
               left: `${item.x}%`,
               top: `${item.y}%`,
               fontSize: `${item.size}px`,
-              animationDelay:
-                `${item.delay}s`,
-              animationDuration:
-                `${11 + index}s`,
+              animationDelay: `${item.delay}s`,
+              animationDuration: `${11 + index}s`,
             }}
           >
             {item.emoji}
@@ -343,24 +335,18 @@ function GamingBackground() {
       </div>
 
       <div className="zg-sparks">
-        {Array.from(
-          { length: 16 },
-          (_, index) => (
-            <i
-              key={index}
-              style={{
-                left:
-                  `${(index * 31 + 7) % 100}%`,
-                top:
-                  `${(index * 23 + 9) % 100}%`,
-                animationDelay:
-                  `${-(index % 7)}s`,
-                animationDuration:
-                  `${4 + (index % 4)}s`,
-              }}
-            />
-          )
-        )}
+        {Array.from({ length: 16 }, (_, index) => (
+          <i
+            key={index}
+            style={{
+              left: `${(index * 31 + 7) % 100}%`,
+              top: `${(index * 23 + 9) % 100}%`,
+              animationDelay: `${-(index % 7)}s`,
+              animationDuration:
+                `${4 + (index % 4)}s`,
+            }}
+          />
+        ))}
       </div>
     </div>
   )
@@ -378,47 +364,35 @@ function WinCelebration() {
     >
       <div className="zg-celebration-glow" />
 
-      {Array.from(
-        { length: 64 },
-        (_, index) => {
-          const style = {
-            left:
-              `${(index * 37 + 11) % 100}%`,
-            width:
-              `${6 + (index % 5)}px`,
-            height:
-              `${9 + (index % 7)}px`,
-            backgroundColor:
-              confettiColors[
-                index % confettiColors.length
-              ],
-            borderRadius:
-              index % 3 === 0
-                ? '50%'
-                : '2px',
-            animationDelay:
-              `${(index % 12) * 0.055}s`,
-            animationDuration:
-              `${2.6 + (index % 6) * 0.22}s`,
-            '--drift':
-              `${((index * 29) % 220) - 110}px`,
-            '--spin':
-              `${
-                index % 2 === 0
-                  ? 720
-                  : -720
-              }deg`,
-          } as CSSProperties
+      {Array.from({ length: 64 }, (_, index) => {
+        const style = {
+          left: `${(index * 37 + 11) % 100}%`,
+          width: `${6 + (index % 5)}px`,
+          height: `${9 + (index % 7)}px`,
+          backgroundColor:
+            confettiColors[
+              index % confettiColors.length
+            ],
+          borderRadius:
+            index % 3 === 0 ? '50%' : '2px',
+          animationDelay:
+            `${(index % 12) * 0.055}s`,
+          animationDuration:
+            `${2.6 + (index % 6) * 0.22}s`,
+          '--drift':
+            `${((index * 29) % 220) - 110}px`,
+          '--spin':
+            `${index % 2 === 0 ? 720 : -720}deg`,
+        } as CSSProperties
 
-          return (
-            <span
-              key={index}
-              className="zg-confetti"
-              style={style}
-            />
-          )
-        }
-      )}
+        return (
+          <span
+            key={index}
+            className="zg-confetti"
+            style={style}
+          />
+        )
+      })}
     </div>
   )
 }
@@ -426,8 +400,17 @@ function WinCelebration() {
 /* ==========================================
    SCRATCH CARD
 
-   Counts completed scratch gestures.
-   Does not require 100% pixel clearance.
+   IMPORTANT:
+
+   1. Each card coating starts fully covered.
+   2. User scratches away the coating.
+   3. At 75% clearance, ONE attempt completes.
+   4. A fresh coating is drawn.
+   5. The reward remains hidden until the
+      final required attempt.
+
+   The counter never increments simply
+   because a pointer gesture ended.
 ========================================== */
 
 function ScratchCard({
@@ -446,18 +429,26 @@ function ScratchCard({
   const previousPointRef =
     useRef<Point | null>(null)
 
-  const gestureDistanceRef = useRef(0)
+  const completedAttemptsRef = useRef(0)
+  const coatingCompletedRef = useRef(false)
+  const gameCompletedRef = useRef(false)
 
-  const scratchCountRef = useRef(0)
-  const completedRef = useRef(false)
+  const lastCoverageCheckRef = useRef(0)
 
-  const [scratchCount, setScratchCount] =
+  const resetTimerRef =
+    useRef<number | null>(null)
+
+  const [completedAttempts, setCompletedAttempts] =
     useState(0)
 
-  const [
-    canvasUnavailable,
-    setCanvasUnavailable,
-  ] = useState(false)
+  const [coatingPercent, setCoatingPercent] =
+    useState(0)
+
+  const [coatingChanging, setCoatingChanging] =
+    useState(false)
+
+  const [canvasUnavailable, setCanvasUnavailable] =
+    useState(false)
 
   const target = Math.max(
     MIN_SCRATCH_COUNT,
@@ -467,228 +458,364 @@ function ScratchCard({
     )
   )
 
-  const progress = Math.min(
-    100,
-    (scratchCount / target) * 100
-  )
-
   const remaining = Math.max(
     0,
-    target - scratchCount
+    target - completedAttempts
   )
 
-  /* ========================================
-     DRAW ORIGINAL SCRATCH COATING
-  ======================================== */
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-
-    const context = canvas?.getContext('2d')
-
-    if (!canvas || !context) {
-      setCanvasUnavailable(true)
-      return
-    }
-
-    setCanvasUnavailable(false)
-    setScratchCount(0)
-
-    scratchCountRef.current = 0
-    completedRef.current = false
-    activePointerRef.current = null
-    previousPointRef.current = null
-    gestureDistanceRef.current = 0
-
-    context.globalCompositeOperation =
-      'source-over'
-
-    context.clearRect(
-      0,
-      0,
-      canvas.width,
-      canvas.height
+  const progress =
+    Math.min(
+      100,
+      (completedAttempts / target) * 100
     )
 
-    const gradient =
-      context.createLinearGradient(
-        0,
-        0,
-        canvas.width,
-        canvas.height
-      )
+  /*
+    Draw a completely new coating.
 
-    gradient.addColorStop(0, '#7745bd')
-    gradient.addColorStop(0.3, '#b985f0')
-    gradient.addColorStop(0.55, '#e2c9ff')
-    gradient.addColorStop(1, '#8b4bc6')
+    Every new coating is a new attempt.
+  */
+  const drawCoating = useCallback(
+    (attemptNumber: number) => {
+      const canvas = canvasRef.current
+      const context = canvas?.getContext('2d', {
+        willReadFrequently: true,
+      })
 
-    context.fillStyle = gradient
-
-    context.fillRect(
-      0,
-      0,
-      canvas.width,
-      canvas.height
-    )
-
-    for (
-      let y = 12;
-      y < canvas.height;
-      y += 22
-    ) {
-      for (
-        let x = 12;
-        x < canvas.width;
-        x += 22
-      ) {
-        context.beginPath()
-        context.arc(
-          x,
-          y,
-          1.2,
-          0,
-          Math.PI * 2
-        )
-
-        context.fillStyle =
-          'rgba(50, 20, 90, 0.14)'
-
-        context.fill()
+      if (!canvas || !context) {
+        setCanvasUnavailable(true)
+        return
       }
-    }
 
-    context.strokeStyle =
-      'rgba(255, 255, 255, 0.5)'
+      setCanvasUnavailable(false)
 
-    context.lineWidth = 1
+      context.globalCompositeOperation =
+        'source-over'
 
-    context.strokeRect(
-      18,
-      18,
-      canvas.width - 36,
-      canvas.height - 36
-    )
-
-    context.textAlign = 'center'
-    context.fillStyle = '#35204f'
-
-    context.font = '600 14px system-ui'
-
-    context.fillText(
-      'ZEN LUCKY TABLE',
-      canvas.width / 2,
-      63
-    )
-
-    context.font = '34px Georgia'
-
-    context.fillText(
-      'Unlock your luck',
-      canvas.width / 2,
-      124
-    )
-
-    context.font = '16px system-ui'
-
-    context.fillText(
-      `Complete ${target} scratches`,
-      canvas.width / 2,
-      168
-    )
-
-    context.font = '14px system-ui'
-
-    context.fillText(
-      'Your surprise stays hidden until the end',
-      canvas.width / 2,
-      196
-    )
-
-    context.font = '22px Georgia'
-
-    context.fillText(
-      '✦',
-      canvas.width / 2,
-      237
-    )
-  }, [target])
-
-  /* ========================================
-     REVEAL AFTER REQUIRED SCRATCHES
-  ======================================== */
-
-  const completeScratchGame = () => {
-    if (
-      completedRef.current ||
-      !enabled ||
-      revealed
-    ) {
-      return
-    }
-
-    completedRef.current = true
-
-    const canvas = canvasRef.current
-    const context = canvas?.getContext('2d')
-
-    if (canvas && context) {
       context.clearRect(
         0,
         0,
         canvas.width,
         canvas.height
       )
-    }
 
-    scratchCountRef.current = target
-    setScratchCount(target)
+      const gradient =
+        context.createLinearGradient(
+          0,
+          0,
+          canvas.width,
+          canvas.height
+        )
 
+      gradient.addColorStop(0, '#7745bd')
+      gradient.addColorStop(0.3, '#b985f0')
+      gradient.addColorStop(0.55, '#e2c9ff')
+      gradient.addColorStop(1, '#8b4bc6')
+
+      context.fillStyle = gradient
+
+      context.fillRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      )
+
+      for (
+        let y = 12;
+        y < canvas.height;
+        y += 22
+      ) {
+        for (
+          let x = 12;
+          x < canvas.width;
+          x += 22
+        ) {
+          context.beginPath()
+
+          context.arc(
+            x,
+            y,
+            1.2,
+            0,
+            Math.PI * 2
+          )
+
+          context.fillStyle =
+            'rgba(50, 20, 90, 0.14)'
+
+          context.fill()
+        }
+      }
+
+      context.strokeStyle =
+        'rgba(255, 255, 255, 0.5)'
+
+      context.lineWidth = 1
+
+      context.strokeRect(
+        18,
+        18,
+        canvas.width - 36,
+        canvas.height - 36
+      )
+
+      context.textAlign = 'center'
+      context.fillStyle = '#35204f'
+
+      context.font = '600 14px system-ui'
+
+      context.fillText(
+        'ZEN LUCKY TABLE',
+        canvas.width / 2,
+        63
+      )
+
+      context.font = '34px Georgia'
+
+      context.fillText(
+        'Scratch & discover',
+        canvas.width / 2,
+        124
+      )
+
+      context.font = '600 17px system-ui'
+
+      context.fillText(
+        `CARD ${attemptNumber} OF ${target}`,
+        canvas.width / 2,
+        166
+      )
+
+      context.font = '14px system-ui'
+
+      context.fillText(
+        'Clear 75% of this card',
+        canvas.width / 2,
+        196
+      )
+
+      context.font = '22px Georgia'
+
+      context.fillText(
+        '✦',
+        canvas.width / 2,
+        237
+      )
+
+      context.globalCompositeOperation =
+        'destination-out'
+    },
+    [target]
+  )
+
+  /*
+    Initialize the first coating.
+
+    A new selected game round remounts
+    this component using its React key.
+  */
+  useEffect(() => {
+    completedAttemptsRef.current = 0
+    coatingCompletedRef.current = false
+    gameCompletedRef.current = false
     activePointerRef.current = null
     previousPointRef.current = null
-    gestureDistanceRef.current = 0
+    lastCoverageCheckRef.current = 0
 
-    onReveal()
+    drawCoating(1)
+
+    return () => {
+      if (resetTimerRef.current !== null) {
+        window.clearTimeout(resetTimerRef.current)
+      }
+    }
+  }, [drawCoating])
+
+  /*
+    Calculate actual cleared pixel coverage.
+
+    Transparent pixels indicate that
+    the scratch coating was removed.
+
+    A tap or tiny swipe will not complete
+    the coating.
+  */
+  const calculateClearedPercent = () => {
+    const canvas = canvasRef.current
+
+    const context = canvas?.getContext('2d', {
+      willReadFrequently: true,
+    })
+
+    if (!canvas || !context) {
+      return 0
+    }
+
+    try {
+      const { data } = context.getImageData(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      )
+
+      let clearedPixels = 0
+      const totalPixels =
+        canvas.width * canvas.height
+
+      for (
+        let index = 3;
+        index < data.length;
+        index += 4
+      ) {
+        if (data[index] < 128) {
+          clearedPixels += 1
+        }
+      }
+
+      return (
+        clearedPixels / totalPixels
+      ) * 100
+    } catch (error) {
+      console.error(
+        'Unable to measure scratch coverage:',
+        error
+      )
+
+      return 0
+    }
   }
 
-  /* ========================================
-     REGISTER ONE VALID SCRATCH
+  /*
+    Complete exactly one card.
 
-     A completed drag counts once.
-  ======================================== */
-
-  const registerScratch = () => {
+    Prevent duplicate completion from
+    pointerup, pointercancel, and
+    pointercapture events.
+  */
+  const completeOneCard = () => {
     if (
+      coatingCompletedRef.current ||
+      gameCompletedRef.current ||
       !enabled ||
-      revealed ||
-      completedRef.current
+      revealed
     ) {
       return
     }
 
+    coatingCompletedRef.current = true
+
     const next = Math.min(
       target,
-      scratchCountRef.current + 1
+      completedAttemptsRef.current + 1
     )
 
-    scratchCountRef.current = next
-    setScratchCount(next)
+    completedAttemptsRef.current = next
+    setCompletedAttempts(next)
+
+    activePointerRef.current = null
+    previousPointRef.current = null
+
+    setCoatingPercent(100)
 
     if (next >= target) {
-      completeScratchGame()
+      gameCompletedRef.current = true
+
+      const canvas = canvasRef.current
+      const context = canvas?.getContext('2d')
+
+      if (canvas && context) {
+        context.clearRect(
+          0,
+          0,
+          canvas.width,
+          canvas.height
+        )
+      }
+
+      onReveal()
+      return
     }
+
+    /*
+      Brief pause so customers can see
+      that the current card was completed.
+
+      Then start the next fresh card.
+    */
+    setCoatingChanging(true)
+
+    resetTimerRef.current =
+      window.setTimeout(() => {
+        if (gameCompletedRef.current) {
+          return
+        }
+
+        drawCoating(next + 1)
+
+        coatingCompletedRef.current = false
+        lastCoverageCheckRef.current = 0
+
+        setCoatingPercent(0)
+        setCoatingChanging(false)
+
+        resetTimerRef.current = null
+      }, 450)
   }
 
-  /* ========================================
-     CANVAS POINTER COORDINATES
-  ======================================== */
+  /*
+    Inspect the coating while scratching.
+
+    Releasing the finger is NOT required
+    for completion.
+
+    Completion depends on actual area
+    cleared, not the number of gestures.
+  */
+  const inspectCoverage = (force = false) => {
+    if (
+      coatingCompletedRef.current ||
+      gameCompletedRef.current ||
+      !enabled ||
+      revealed
+    ) {
+      return
+    }
+
+    const now = performance.now()
+
+    if (
+      !force &&
+      now - lastCoverageCheckRef.current <
+        COVERAGE_CHECK_INTERVAL_MS
+    ) {
+      return
+    }
+
+    lastCoverageCheckRef.current = now
+
+    const percent =
+      calculateClearedPercent()
+
+    setCoatingPercent(
+      Math.min(100, Math.round(percent))
+    )
+
+    if (
+      percent >= REQUIRED_CLEAR_PERCENT
+    ) {
+      completeOneCard()
+    }
+  }
 
   const getPointerPoint = (
     event: ReactPointerEvent<HTMLCanvasElement>
   ): Point | null => {
     const canvas = canvasRef.current
 
-    if (!canvas) return null
+    if (!canvas) {
+      return null
+    }
 
     const rect =
       canvas.getBoundingClientRect()
@@ -711,6 +838,7 @@ function ScratchCard({
           ) * canvas.width
         )
       ),
+
       y: Math.max(
         0,
         Math.min(
@@ -724,76 +852,84 @@ function ScratchCard({
     }
   }
 
-  /* ========================================
-     SCRATCH SURFACE
+  /*
+    Erase coating using smooth rounded
+    strokes.
 
-     The coating is decorative.
-     The reveal condition is scratch count.
-  ======================================== */
-
+    This works with touch, mouse,
+    and supported pen input.
+  */
   const scratch = (
     event: ReactPointerEvent<HTMLCanvasElement>
   ) => {
     if (
       !enabled ||
       revealed ||
-      completedRef.current
+      coatingCompletedRef.current ||
+      gameCompletedRef.current ||
+      coatingChanging
     ) {
       return
     }
 
     const canvas = canvasRef.current
-    const context = canvas?.getContext('2d')
+
+    const context = canvas?.getContext('2d', {
+      willReadFrequently: true,
+    })
+
     const point = getPointerPoint(event)
 
-    if (!canvas || !context || !point) {
+    if (
+      !canvas ||
+      !context ||
+      !point
+    ) {
       return
     }
 
     const previous =
       previousPointRef.current ?? point
 
-    const distance = Math.hypot(
-      point.x - previous.x,
-      point.y - previous.y
+    context.globalCompositeOperation =
+      'destination-out'
+
+    context.lineWidth = BRUSH_SIZE
+    context.lineCap = 'round'
+    context.lineJoin = 'round'
+
+    context.beginPath()
+    context.moveTo(previous.x, previous.y)
+    context.lineTo(point.x, point.y)
+    context.stroke()
+
+    /*
+      Also erase a circle so taps and
+      initial pointer contact visually
+      affect the coating.
+
+      A single circle is nowhere near
+      the 75% completion requirement.
+    */
+    context.beginPath()
+
+    context.arc(
+      point.x,
+      point.y,
+      BRUSH_SIZE / 2,
+      0,
+      Math.PI * 2
     )
 
-    gestureDistanceRef.current += distance
+    context.fillStyle =
+      'rgba(0, 0, 0, 1)'
 
-    const steps = Math.max(
-      1,
-      Math.ceil(distance / 5)
-    )
-
-    for (
-      let step = 0;
-      step <= steps;
-      step += 1
-    ) {
-      const amount = step / steps
-
-      const x =
-        previous.x +
-        (point.x - previous.x) * amount
-
-      const y =
-        previous.y +
-        (point.y - previous.y) * amount
-
-      context.clearRect(
-        Math.floor(x - BRUSH_SIZE / 2),
-        Math.floor(y - BRUSH_SIZE / 2),
-        BRUSH_SIZE,
-        BRUSH_SIZE
-      )
-    }
+    context.fill()
 
     previousPointRef.current = point
-  }
 
-  /* ========================================
-     POINTER START
-  ======================================== */
+    inspectCoverage()
+  }
 
   const startScratching = (
     event: ReactPointerEvent<HTMLCanvasElement>
@@ -801,7 +937,9 @@ function ScratchCard({
     if (
       !enabled ||
       revealed ||
-      completedRef.current ||
+      coatingChanging ||
+      coatingCompletedRef.current ||
+      gameCompletedRef.current ||
       canvasUnavailable ||
       !event.isPrimary ||
       event.button !== 0 ||
@@ -814,13 +952,14 @@ function ScratchCard({
 
     const point = getPointerPoint(event)
 
-    if (!point) return
+    if (!point) {
+      return
+    }
 
     activePointerRef.current =
       event.pointerId
 
     previousPointRef.current = point
-    gestureDistanceRef.current = 0
 
     try {
       event.currentTarget.setPointerCapture(
@@ -835,12 +974,20 @@ function ScratchCard({
     scratch(event)
   }
 
-  /* ========================================
-     POINTER END
+  const moveScratching = (
+    event: ReactPointerEvent<HTMLCanvasElement>
+  ) => {
+    if (
+      activePointerRef.current !==
+      event.pointerId
+    ) {
+      return
+    }
 
-     Count only a completed, meaningful
-     scratch gesture.
-  ======================================== */
+    event.preventDefault()
+
+    scratch(event)
+  }
 
   const stopScratching = (
     event: ReactPointerEvent<HTMLCanvasElement>
@@ -854,74 +1001,102 @@ function ScratchCard({
 
     if (event.type === 'pointerup') {
       scratch(event)
-    }
 
-    const validGesture =
-      event.type === 'pointerup' &&
-      gestureDistanceRef.current >=
-        MIN_GESTURE_DISTANCE
+      /*
+        Force a final coverage check.
+        A card is counted only if
+        sufficient coating was removed.
+      */
+      inspectCoverage(true)
+    }
 
     activePointerRef.current = null
     previousPointRef.current = null
-    gestureDistanceRef.current = 0
 
-    if (
-      event.currentTarget.hasPointerCapture(
-        event.pointerId
-      )
-    ) {
-      event.currentTarget.releasePointerCapture(
-        event.pointerId
-      )
-    }
-
-    if (validGesture) {
-      registerScratch()
+    try {
+      if (
+        event.currentTarget.hasPointerCapture(
+          event.pointerId
+        )
+      ) {
+        event.currentTarget.releasePointerCapture(
+          event.pointerId
+        )
+      }
+    } catch {
+      // Pointer capture may already be lost.
     }
   }
 
-  /* ========================================
-     KEYBOARD ACCESSIBLE SCRATCH
+  const won = result.kind === 'win'
 
-     One button press = one scratch.
-  ======================================== */
+  /*
+    Accessibility:
 
-  const scratchNextStrip = () => {
+    Keyboard users can progressively
+    clear the coating using the button.
+
+    Unlike the old "Scratch next strip"
+    control, one press does NOT count
+    as one completed attempt.
+
+    The same 75% coverage rule applies.
+  */
+  const scratchAccessibleArea = () => {
     if (
       !enabled ||
       revealed ||
-      completedRef.current ||
-      canvasUnavailable ||
-      activePointerRef.current !== null
+      coatingChanging ||
+      coatingCompletedRef.current ||
+      gameCompletedRef.current ||
+      canvasUnavailable
     ) {
       return
     }
 
     const canvas = canvasRef.current
-    const context = canvas?.getContext('2d')
+    const context = canvas?.getContext('2d', {
+      willReadFrequently: true,
+    })
 
-    if (!canvas || !context) return
+    if (!canvas || !context) {
+      return
+    }
 
-    const index = scratchCountRef.current
+    /*
+      Erase one horizontal band at a time.
 
-    const y =
-      (index * 23) % canvas.height
+      Button presses progressively remove
+      the coating. The completion threshold
+      is checked exactly as for pointer input.
+    */
+    const currentPercent =
+      calculateClearedPercent()
+
+    const bandHeight = 35
+
+    const bandIndex = Math.min(
+      Math.floor(
+        (currentPercent / 100) *
+        (canvas.height / bandHeight)
+      ),
+      Math.ceil(
+        canvas.height / bandHeight
+      ) - 1
+    )
+
+    context.globalCompositeOperation =
+      'destination-out'
 
     context.clearRect(
       0,
-      y,
+      bandIndex * bandHeight,
       canvas.width,
-      20
+      bandHeight
     )
 
-    registerScratch()
+    inspectCoverage(true)
   }
-
-  const won = result.kind === 'win'
-
-  /* ========================================
-     SCRATCH CARD UI
-  ======================================== */
 
   return (
     <div className="zg-scratch-area">
@@ -942,7 +1117,7 @@ function ScratchCard({
               className="zg-prize-emoji"
               aria-hidden="true"
             >
-              {result.kind === 'win'
+              {won
                 ? result.offer.emoji
                 : '🥺'}
             </span>
@@ -954,13 +1129,13 @@ function ScratchCard({
             </span>
 
             <h3>
-              {result.kind === 'win'
+              {won
                 ? result.offer.title
                 : 'Good Luck Next Time!'}
             </h3>
 
             <p>
-              {result.kind === 'win'
+              {won
                 ? result.offer.detail
                 : 'Your next little surprise is waiting.'}
             </p>
@@ -978,11 +1153,16 @@ function ScratchCard({
           >
             <Sparkles size={28} />
 
-            <strong>Keep scratching</strong>
+            <strong>
+              {coatingChanging
+                ? 'Card completed!'
+                : 'Keep scratching'}
+            </strong>
 
             <span>
-              Complete {target} scratches to
-              unlock your result
+              {coatingChanging
+                ? 'Preparing your next card…'
+                : `Complete ${target} full cards to unlock your result`}
             </span>
           </div>
         )}
@@ -996,20 +1176,18 @@ function ScratchCard({
           style={{
             touchAction: 'none',
             pointerEvents:
-              enabled && !revealed
+              enabled &&
+              !revealed &&
+              !coatingChanging &&
+              !coatingCompletedRef.current
                 ? 'auto'
                 : 'none',
+            opacity:
+              coatingChanging ? 0.35 : 1,
+            transition: 'opacity 0.2s ease',
           }}
           onPointerDown={startScratching}
-          onPointerMove={event => {
-            if (
-              activePointerRef.current ===
-              event.pointerId
-            ) {
-              event.preventDefault()
-              scratch(event)
-            }
-          }}
+          onPointerMove={moveScratching}
           onPointerUp={stopScratching}
           onPointerCancel={stopScratching}
           onLostPointerCapture={stopScratching}
@@ -1019,33 +1197,34 @@ function ScratchCard({
         />
       </div>
 
-      {/* SCRATCH COUNTER */}
+      {/* COMPLETED CARD COUNTER */}
 
       <div className="zg-scratch-progress">
         <div className="zg-progress-label">
           <span>
             {revealed
-              ? 'Reward unlocked'
-              : 'Scratch progress'}
+              ? 'All cards completed'
+              : 'Completed scratch cards'}
           </span>
 
           <strong>
-            {scratchCount} / {target}
+            {completedAttempts} / {target}
           </strong>
         </div>
 
         <div
           className="zg-progress-track"
           role="progressbar"
-          aria-label="Scratch completion"
+          aria-label="Completed scratch cards"
           aria-valuemin={0}
           aria-valuemax={target}
-          aria-valuenow={scratchCount}
+          aria-valuenow={completedAttempts}
         >
           <span
             style={{
               width: `${progress}%`,
-              transition: 'width 0.25s ease',
+              transition:
+                'width 0.3s ease',
             }}
           />
         </div>
@@ -1055,23 +1234,40 @@ function ScratchCard({
         <div className="zg-scratch-help">
           <p aria-live="polite">
             {canvasUnavailable
-              ? 'The scratch surface is unavailable. Please reload.'
-              : remaining === 1
-                ? 'Just one more scratch to reveal your surprise!'
-                : `${remaining} more scratches to reveal your surprise!`}
+              ? 'Scratch surface unavailable. Please reload.'
+              : coatingChanging
+                ? `Card ${completedAttempts} completed! Preparing the next card…`
+                : remaining === 1
+                  ? 'Final card! Scratch it fully to reveal your surprise.'
+                  : `Complete ${remaining} more full scratch cards to unlock your result.`}
+          </p>
+
+          <p
+            style={{
+              marginTop: 8,
+              fontSize: 12,
+              opacity: 0.8,
+            }}
+          >
+            {coatingChanging
+              ? 'Well done!'
+              : `Current card cleared: ${coatingPercent}% — ${REQUIRED_CLEAR_PERCENT}% required`}
           </p>
 
           <button
             type="button"
             disabled={
               !enabled ||
-              canvasUnavailable
+              canvasUnavailable ||
+              coatingChanging
             }
-            tabIndex={enabled ? 0 : -1}
-            onClick={scratchNextStrip}
-            title="Use this button to complete one scratch"
+            onClick={scratchAccessibleArea}
+            title="Progressively clear the current card using the keyboard"
+            style={{
+              marginTop: 10,
+            }}
           >
-            Scratch next strip
+            Clear card area
           </button>
         </div>
       )}
@@ -1085,10 +1281,6 @@ function ScratchCard({
 
 function GamesExperience() {
   const theme = useSiteTheme()
-
-  /* ========================================
-     GAME CONFIGURATION
-  ======================================== */
 
   const [gameConfig, setGameConfig] =
     useState<GameConfig>(
@@ -1113,7 +1305,7 @@ function GamesExperience() {
       })
       .catch(error => {
         console.warn(
-          'Unable to load live game configuration:',
+          'Unable to load game configuration:',
           error
         )
       })
@@ -1130,10 +1322,6 @@ function GamesExperience() {
       unsubscribe()
     }
   }, [])
-
-  /* ========================================
-     GAME STATE
-  ======================================== */
 
   const [navOpen, setNavOpen] =
     useState(false)
@@ -1296,9 +1484,6 @@ function GamesExperience() {
 
   /* ========================================
      CHOOSE CARD
-
-     Snapshot the scratch requirement at
-     the start of each game round.
   ======================================== */
 
   const chooseCard = (index: number) => {
@@ -1342,6 +1527,9 @@ function GamesExperience() {
 
   /* ========================================
      REVEAL RESULT
+
+     Only the ScratchCard completion
+     callback triggers this transition.
   ======================================== */
 
   const revealResult = () => {
@@ -1356,10 +1544,6 @@ function GamesExperience() {
     phase === 'spread' ||
     phase === 'choose'
 
-  /* ========================================
-     HEADING MESSAGE
-  ======================================== */
-
   const message =
     !gameConfig.enabled &&
     phase === 'choose'
@@ -1373,14 +1557,10 @@ function GamesExperience() {
             : phase === 'flipping'
               ? 'Something is waiting for you.'
               : phase === 'scratch'
-                ? `Complete ${roundScratchCount} scratches. Unlock your luck.`
+                ? `Complete ${roundScratchCount} full cards. Unlock your luck.`
                 : won
                   ? 'A little win. A big celebration.'
                   : 'Your next lucky moment awaits.'
-
-  /* ========================================
-     PAGE RENDER
-  ======================================== */
 
   return (
     <main
@@ -1581,8 +1761,9 @@ function GamesExperience() {
             <span>Choose a card</span>
             <i aria-hidden="true" />
             <span>
-              Scratch{' '}
-              {getRequiredScratches(gameConfig)} times
+              Complete{' '}
+              {getRequiredScratches(gameConfig)}{' '}
+              scratch cards
             </span>
             <i aria-hidden="true" />
             <span>Discover</span>
@@ -1850,8 +2031,11 @@ function GamesExperience() {
           <div className="zg-stage-caption">
             {scratchEnabled && (
               <p>
-                Complete {roundScratchCount}{' '}
-                scratches to unlock your result.
+                Fully scratch{' '}
+                {roundScratchCount}{' '}
+                cards to unlock your result.
+                Each completed card counts
+                as one attempt.
               </p>
             )}
 
