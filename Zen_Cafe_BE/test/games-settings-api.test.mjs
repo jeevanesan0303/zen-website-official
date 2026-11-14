@@ -1,4 +1,4 @@
-process.env.ZEN_TEST_MODE = 'true'
+﻿process.env.ZEN_TEST_MODE = 'true'
 
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
@@ -65,12 +65,12 @@ function createMockReqRes({ method, path, headers = {}, body = null }) {
 
 async function runTests() {
   console.log('\n======================================================')
-  console.log('🧪 ZEN CAFÉ — PHASE 6: GAMES & WEBSITE SETTINGS TEST SUITE')
+  console.log('ðŸ§ª ZEN CAFÃ‰ â€” PHASE 6: GAMES & WEBSITE SETTINGS TEST SUITE')
   console.log('======================================================\n')
 
   const pool = await getDbPool()
   const inMemory = isDbInMemory()
-  console.log(`Database engine: ${inMemory ? '🟡 IN-MEMORY POSTGRESQL (pg-mem)' : '🟢 REAL POSTGRESQL (zencafe_db)'}`)
+  console.log(`Database engine: ${inMemory ? 'ðŸŸ¡ IN-MEMORY POSTGRESQL (pg-mem)' : 'ðŸŸ¢ REAL POSTGRESQL (zencafe_db)'}`)
 
   // Capture original records if any exist in the database for exact restoration
   let originalGameSettings = null
@@ -111,7 +111,7 @@ async function runTests() {
     assert.equal(loginRes.status, 200, 'Admin login should succeed with 200')
     assert.equal(loginRes.body.success, true, 'Admin login should return success: true')
     assert.ok(loginRes.body.token, 'Admin login should return session token')
-    console.log('  ✅ Admin login verified and returned server session token.\n')
+    console.log('  âœ… Admin login verified and returned server session token.\n')
 
     // -------------------------------------------------------------------------
     // Test 2: Games Settings Retrieval (Public & Initial)
@@ -127,7 +127,7 @@ async function runTests() {
     assert.equal(getGamesRes.body.success, true)
     assert.ok(Array.isArray(getGamesRes.body.cards), 'Cards array returned')
     assert.equal(getGamesRes.body.cards.length, 5, 'Exactly 5 cards returned')
-    console.log('  ✅ Games settings retrieved successfully (5 cards configured).\n')
+    console.log('  âœ… Games settings retrieved successfully (5 cards configured).\n')
 
     // -------------------------------------------------------------------------
     // Test 3: Games Settings Update (Admin)
@@ -140,7 +140,7 @@ async function runTests() {
           productId: 'demo-matcha-latte',
           title: 'Zen Matcha Latte',
           detail: 'Ceremonial grade green tea.',
-          emoji: '🍵',
+          emoji: 'ðŸµ',
         },
       },
       { cardId: 2, prize: null },
@@ -151,7 +151,7 @@ async function runTests() {
           productId: 'demo-chocolate-cake',
           title: 'Zen Truffle Cake',
           detail: 'Rich dark chocolate decadence.',
-          emoji: '🍰',
+          emoji: 'ðŸ°',
         },
       },
       { cardId: 5, prize: null },
@@ -163,6 +163,7 @@ async function runTests() {
       headers: adminHeaders,
       body: {
         enabled: true,
+        scratchCount: 25,
         cards: updatedCards,
       },
     })
@@ -170,7 +171,7 @@ async function runTests() {
     assert.equal(updateGamesRes.status, 200, 'PUT /api/games/settings returns 200')
     assert.equal(updateGamesRes.body.success, true)
     assert.equal(updateGamesRes.body.config.cards[0].prize.title, 'Zen Matcha Latte')
-    console.log('  ✅ Games settings updated and persisted successfully.\n')
+    console.log('  âœ… Games settings updated and persisted successfully.\n')
 
     // -------------------------------------------------------------------------
     // Test 4: Public Games Page Reflects Changes
@@ -185,7 +186,7 @@ async function runTests() {
     assert.equal(publicReflectRes.status, 200)
     assert.equal(publicReflectRes.body.cards[0].prize.title, 'Zen Matcha Latte')
     assert.equal(publicReflectRes.body.cards[3].prize.title, 'Zen Truffle Cake')
-    console.log('  ✅ Public read reflects updated card configuration without auth.\n')
+    console.log('  âœ… Public read reflects updated card configuration without auth.\n')
 
     // -------------------------------------------------------------------------
     // Test 5: Settings Persistence After Refresh
@@ -197,12 +198,12 @@ async function runTests() {
       ? JSON.parse(dbCheck.rows[0].settings)
       : dbCheck.rows[0].settings
     assert.equal(dbSettings.cards[0].prize.title, 'Zen Matcha Latte')
-    console.log('  ✅ Verified direct PostgreSQL row persistence in public.game_settings.\n')
+    console.log('  âœ… Verified direct PostgreSQL row persistence in public.game_settings.\n')
 
     // -------------------------------------------------------------------------
-    // Test 6: Café Information Retrieval (Public vs Admin)
+    // Test 6: CafÃ© Information Retrieval (Public vs Admin)
     // -------------------------------------------------------------------------
-    console.log('Test 6: Café Information Retrieval...')
+    console.log('Test 6: CafÃ© Information Retrieval...')
     const getPublicSettingsReq = createMockReqRes({
       method: 'GET',
       path: '/api/settings',
@@ -211,7 +212,7 @@ async function runTests() {
     const getPublicSettingsRes = await getPublicSettingsReq.dispatch()
     assert.equal(getPublicSettingsRes.status, 200)
     assert.equal(getPublicSettingsRes.body.success, true)
-    assert.ok(getPublicSettingsRes.body.settings.cafeName, 'Café name present')
+    assert.ok(getPublicSettingsRes.body.settings.cafeName, 'CafÃ© name present')
     assert.equal(getPublicSettingsRes.body.settings.adminName, undefined, 'Admin name not exposed in public read')
     assert.equal(getPublicSettingsRes.body.settings.adminEmail, undefined, 'Admin email not exposed in public read')
 
@@ -224,18 +225,18 @@ async function runTests() {
     assert.equal(getAdminSettingsRes.status, 200)
     assert.equal(getAdminSettingsRes.body.success, true)
     assert.ok(getAdminSettingsRes.body.settings.adminEmail, 'Admin email present in admin read')
-    console.log('  ✅ Café settings retrieved; safe public view cleanly filters private administrator fields.\n')
+    console.log('  âœ… CafÃ© settings retrieved; safe public view cleanly filters private administrator fields.\n')
 
     // -------------------------------------------------------------------------
-    // Test 7: Café Information Update
+    // Test 7: CafÃ© Information Update
     // -------------------------------------------------------------------------
-    console.log('Test 7: Café Information Update...')
+    console.log('Test 7: CafÃ© Information Update...')
     const updateSettingsReq = createMockReqRes({
       method: 'PUT',
       path: '/api/settings',
       headers: adminHeaders,
       body: {
-        cafeName: 'Zen Café Colombo',
+        cafeName: 'Zen CafÃ© Colombo',
         tagline: 'Tranquil Dining & Specialty Coffee',
         phone: '011 987 6543',
         address: 'No. 88, Galle Face Terrace, Colombo 03, Sri Lanka',
@@ -246,9 +247,9 @@ async function runTests() {
     const updateSettingsRes = await updateSettingsReq.dispatch()
     assert.equal(updateSettingsRes.status, 200)
     assert.equal(updateSettingsRes.body.success, true)
-    assert.equal(updateSettingsRes.body.settings.cafeName, 'Zen Café Colombo')
+    assert.equal(updateSettingsRes.body.settings.cafeName, 'Zen CafÃ© Colombo')
     assert.equal(updateSettingsRes.body.settings.phone, '011 987 6543')
-    console.log('  ✅ Café information updated and saved successfully.\n')
+    console.log('  âœ… CafÃ© information updated and saved successfully.\n')
 
     // -------------------------------------------------------------------------
     // Test 8: Public Website Reflects Saved Settings
@@ -261,11 +262,11 @@ async function runTests() {
     })
     const publicSettingsCheckRes = await publicSettingsCheckReq.dispatch()
     assert.equal(publicSettingsCheckRes.status, 200)
-    assert.equal(publicSettingsCheckRes.body.settings.cafeName, 'Zen Café Colombo')
+    assert.equal(publicSettingsCheckRes.body.settings.cafeName, 'Zen CafÃ© Colombo')
     assert.equal(publicSettingsCheckRes.body.settings.phone, '011 987 6543')
     assert.equal(publicSettingsCheckRes.body.settings.openingTime, '08:30')
     assert.equal(publicSettingsCheckRes.body.settings.closingTime, '23:00')
-    console.log('  ✅ Public endpoint immediately reflects saved café details.\n')
+    console.log('  âœ… Public endpoint immediately reflects saved cafÃ© details.\n')
 
     // -------------------------------------------------------------------------
     // Test 9: My Profile Save
@@ -286,7 +287,7 @@ async function runTests() {
     assert.equal(profileUpdateRes.body.settings.adminName, 'Zen Master Admin')
     assert.equal(profileUpdateRes.body.settings.adminEmail, 'master@zencafe.com')
     assert.ok(profileUpdateRes.body.settings.adminAvatar.includes('unsplash'), 'Avatar URL preserved')
-    console.log('  ✅ Administrator Profile updated and saved successfully.\n')
+    console.log('  âœ… Administrator Profile updated and saved successfully.\n')
 
     // -------------------------------------------------------------------------
     // Test 10: Security Settings Save (Password Change with Scrypt)
@@ -359,7 +360,7 @@ async function runTests() {
     adminSession = { token: reAuth.body.token }
     adminHeaders.authorization = `Bearer ${reAuth.body.token}`
     adminHeaders['x-admin-token'] = reAuth.body.token
-    console.log('  ✅ Admin password change and session invalidation successfully verified.\n')
+    console.log('  âœ… Admin password change and session invalidation successfully verified.\n')
 
     // -------------------------------------------------------------------------
     // Test 11: Unauthorized Mutations Return 401/403
@@ -391,7 +392,7 @@ async function runTests() {
     })
     const unauthPassRes = await unauthPassReq.dispatch()
     assert.equal(unauthPassRes.status, 401, 'Unauthorized password change rejected')
-    console.log('  ✅ Unauthorized mutations strictly rejected with HTTP 401.\n')
+    console.log('  âœ… Unauthorized mutations strictly rejected with HTTP 401.\n')
 
     // -------------------------------------------------------------------------
     // Test 12: Partial Updates Preserve Unrelated Fields
@@ -408,10 +409,10 @@ async function runTests() {
     const partialRes = await partialReq.dispatch()
     assert.equal(partialRes.status, 200)
     assert.equal(partialRes.body.settings.currency, 'USD')
-    assert.equal(partialRes.body.settings.cafeName, 'Zen Café Colombo', 'Unrelated cafeName preserved')
+    assert.equal(partialRes.body.settings.cafeName, 'Zen CafÃ© Colombo', 'Unrelated cafeName preserved')
     assert.equal(partialRes.body.settings.phone, '011 987 6543', 'Unrelated phone preserved')
     assert.equal(partialRes.body.settings.openingTime, '08:30', 'Unrelated openingTime preserved')
-    console.log('  ✅ Partial update updated currency without overwriting other café fields.\n')
+    console.log('  âœ… Partial update updated currency without overwriting other cafÃ© fields.\n')
 
     // -------------------------------------------------------------------------
     // Test 13: Invalid Input is Rejected
@@ -425,9 +426,9 @@ async function runTests() {
       body: {
         enabled: true,
         cards: [
-          { cardId: 1, prize: { productId: 'p1', title: 'P1', detail: 'D1', emoji: '🎁' } },
-          { cardId: 2, prize: { productId: 'p2', title: 'P2', detail: 'D2', emoji: '🎁' } },
-          { cardId: 3, prize: { productId: 'p3', title: 'P3', detail: 'D3', emoji: '🎁' } },
+          { cardId: 1, prize: { productId: 'p1', title: 'P1', detail: 'D1', emoji: 'ðŸŽ' } },
+          { cardId: 2, prize: { productId: 'p2', title: 'P2', detail: 'D2', emoji: 'ðŸŽ' } },
+          { cardId: 3, prize: { productId: 'p3', title: 'P3', detail: 'D3', emoji: 'ðŸŽ' } },
           { cardId: 4, prize: null },
           { cardId: 5, prize: null },
         ],
@@ -478,7 +479,7 @@ async function runTests() {
     })
     const shortPassRes = await shortPassReq.dispatch()
     assert.equal(shortPassRes.status, 400, 'Short password rejected with 400')
-    console.log('  ✅ All invalid inputs rejected with appropriate 400 Bad Request messages.\n')
+    console.log('  âœ… All invalid inputs rejected with appropriate 400 Bad Request messages.\n')
 
     // -------------------------------------------------------------------------
     // Test 14: Regression - Existing Products Remain Functional
@@ -493,7 +494,7 @@ async function runTests() {
     assert.equal(productsRes.status, 200)
     assert.equal(productsRes.body.success, true)
     assert.ok(Array.isArray(productsRes.body.data), 'Products array returned')
-    console.log(`  ✅ Existing Products API verified (${productsRes.body.data.length} products).\n`)
+    console.log(`  âœ… Existing Products API verified (${productsRes.body.data.length} products).\n`)
 
     // -------------------------------------------------------------------------
     // Test 15: Regression - Existing Offers Remain Functional
@@ -507,7 +508,7 @@ async function runTests() {
     const offersRes = await offersReq.dispatch()
     assert.equal(offersRes.status, 200)
     assert.equal(offersRes.body.success, true)
-    console.log('  ✅ Existing Offers API verified.\n')
+    console.log('  âœ… Existing Offers API verified.\n')
 
     // -------------------------------------------------------------------------
     // Test 16: Regression - Existing Room Bookings Remain Functional
@@ -522,7 +523,7 @@ async function runTests() {
     assert.equal(bookingsRes.status, 200)
     assert.equal(bookingsRes.body.success, true)
     assert.ok(Array.isArray(bookingsRes.body.availableSlots))
-    console.log('  ✅ Existing Bookings availability API verified.\n')
+    console.log('  âœ… Existing Bookings availability API verified.\n')
 
     // -------------------------------------------------------------------------
     // Test 17: Regression - Existing Registration Remains Functional
@@ -537,7 +538,7 @@ async function runTests() {
     const registerRes = await registerReq.dispatch()
     assert.equal(registerRes.status, 400)
     assert.equal(registerRes.body.success, false)
-    console.log('  ✅ Existing Customer Registration validation verified.\n')
+    console.log('  âœ… Existing Customer Registration validation verified.\n')
 
     // -------------------------------------------------------------------------
     // Test 18: Regression - Existing Gallery Remains Functional
@@ -552,7 +553,7 @@ async function runTests() {
     assert.equal(galleryRes.status, 200)
     assert.equal(galleryRes.body.success, true)
     assert.ok(Array.isArray(galleryRes.body.data))
-    console.log(`  ✅ Existing Gallery photos API verified (${galleryRes.body.data.length} photos).\n`)
+    console.log(`  âœ… Existing Gallery photos API verified (${galleryRes.body.data.length} photos).\n`)
 
   } finally {
     // Restore original records if any were captured
@@ -580,18 +581,19 @@ async function runTests() {
           [JSON.stringify(DEFAULT_SETTINGS)]
         )
       }
-      console.log('🧹 Test cleanup: restored database settings to original state.\n')
+      console.log('ðŸ§¹ Test cleanup: restored database settings to original state.\n')
     } catch (cleanupErr) {
       console.warn('Cleanup warning:', cleanupErr.message)
     }
   }
 
   console.log('======================================================')
-  console.log('🎉 ALL 18 PHASE 6 TESTS PASSED SUCCESSFULLY!')
+  console.log('ðŸŽ‰ ALL 18 PHASE 6 TESTS PASSED SUCCESSFULLY!')
   console.log('======================================================\n')
 }
 
 runTests().catch(err => {
-  console.error('\n❌ TEST FAILURE:', err)
+  console.error('\nâŒ TEST FAILURE:', err)
   process.exit(1)
 })
+
