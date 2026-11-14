@@ -1,38 +1,28 @@
 
 import { getAdminAuthHeaders } from '../admin-auth'
 
-/* ==========================================
+/* =========================================================
    ZEN CAFÉ — SCRATCH GAME STORE
-========================================== */
 
-/*
-  GAME RULE
+   RULES
 
-  scratchCount = required number of
-  FULLY COMPLETED scratch-card attempts.
+   - The customer selects one of five cards.
+   - The customer scratches the same card.
+   - scratchCount controls the required amount of
+     valid scratching activity.
+   - The count is never displayed to customers.
+   - The reward is revealed after the requirement
+     is completed.
 
-  Example:
-  scratchCount = 25
+   This module manages game configuration.
 
-  The customer must complete 25 separate
-  scratch cards before the final result
-  can be revealed.
+   IMPORTANT:
+   Real prize issuance and redemption must be
+   validated by the backend. Local storage is
+   only a configuration cache.
+========================================================= */
 
-  One completed card = one attempt.
-
-  Finger movements, mouse movements,
-  and partially scratched cards must
-  NOT increase the attempt count.
-
-  IMPORTANT:
-  This store manages game configuration.
-  Customer progress and reward eligibility
-  must be enforced by the game backend.
-*/
-
-/* ==========================================
-   TYPES
-========================================== */
+/* ===================== TYPES ===================== */
 
 export type GamePrize = {
   productId: string
@@ -48,24 +38,11 @@ export type GameCardConfig = {
 
 export type GameConfig = {
   enabled: boolean
-
-  /*
-    Legacy API field name.
-
-    Meaning:
-    Required completed scratch-card attempts.
-
-    Retained for compatibility with the
-    existing Games API and admin page.
-  */
   scratchCount: number
-
   cards: GameCardConfig[]
 }
 
-/* ==========================================
-   CONSTANTS
-========================================== */
+/* ===================== CONSTANTS ===================== */
 
 export const GAME_CONFIG_KEY =
   'zen-cafe-scratch-game-v1'
@@ -74,22 +51,13 @@ export const GAME_CONFIG_EVENT =
   'zen-cafe-scratch-game-change'
 
 export const DEFAULT_SCRATCH_COUNT = 25
-
 export const MIN_SCRATCH_COUNT = 1
-
 export const MAX_SCRATCH_COUNT = 100
 
 export const TOTAL_GAME_CARDS = 5
-
 export const REQUIRED_WINNING_CARDS = 2
 
-/*
-  Clear aliases for new code.
-
-  Existing code can continue using
-  DEFAULT_SCRATCH_COUNT and related names.
-*/
-
+// Compatibility exports used by existing admin code.
 export const DEFAULT_REQUIRED_ATTEMPTS =
   DEFAULT_SCRATCH_COUNT
 
@@ -102,15 +70,11 @@ export const MAX_REQUIRED_ATTEMPTS =
 const GAME_SETTINGS_ENDPOINT =
   '/api/games/settings'
 
-/* ==========================================
-   DEFAULT CONFIGURATION
-========================================== */
+/* ===================== DEFAULT CONFIG ===================== */
 
 export const DEFAULT_GAME_CONFIG: GameConfig = {
   enabled: true,
-
-  scratchCount: DEFAULT_REQUIRED_ATTEMPTS,
-
+  scratchCount: DEFAULT_SCRATCH_COUNT,
   cards: [
     {
       cardId: 1,
@@ -145,24 +109,14 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
   ],
 }
 
-/* ==========================================
-   INTERNAL TYPES
-========================================== */
+/* ===================== INTERNAL TYPES ===================== */
 
 type UnknownRecord = Record<string, unknown>
 
-type GameSettingsResponse = {
-  config?: unknown
-  enabled?: unknown
-  scratchCount?: unknown
-  cards?: unknown
-  error?: unknown
-  message?: unknown
+type ApiConfigResult = {
+  config: GameConfig | null
+  scratchCountPresent: boolean
 }
-
-/* ==========================================
-   BASIC HELPERS
-========================================== */
 
 function isRecord(
   value: unknown
@@ -180,30 +134,20 @@ function isValidScratchCount(
   return (
     typeof value === 'number' &&
     Number.isInteger(value) &&
-    value >= MIN_REQUIRED_ATTEMPTS &&
-    value <= MAX_REQUIRED_ATTEMPTS
+    value >= MIN_SCRATCH_COUNT &&
+    value <= MAX_SCRATCH_COUNT
   )
 }
 
-/*
-  Compatibility helper.
-
-  Invalid values use the default of 25.
-*/
+/* ===================== NORMALIZATION ===================== */
 
 export function normalizeScratchCount(
   value: unknown
 ): number {
   return isValidScratchCount(value)
     ? value
-    : DEFAULT_REQUIRED_ATTEMPTS
+    : DEFAULT_SCRATCH_COUNT
 }
-
-/*
-  New descriptive helper.
-
-  Both functions use the same validation.
-*/
 
 export function normalizeRequiredAttempts(
   value: unknown
@@ -211,22 +155,15 @@ export function normalizeRequiredAttempts(
   return normalizeScratchCount(value)
 }
 
-/*
-  Read the configured number of completed
-  scratch-card attempts.
-*/
-
 export function getRequiredScratchAttempts(
   config: GameConfig
 ): number {
-  return normalizeRequiredAttempts(
+  return normalizeScratchCount(
     config.scratchCount
   )
 }
 
-/* ==========================================
-   VALIDATE GAME CONFIGURATION
-========================================== */
+/* ===================== VALIDATION ===================== */
 
 export function isValidGameConfig(
   value: unknown
@@ -245,7 +182,6 @@ export function isValidGameConfig(
   }
 
   const cardIds = new Set<number>()
-
   let winningCards = 0
 
   for (const item of value.cards) {
@@ -273,8 +209,6 @@ export function isValidGameConfig(
       continue
     }
 
-    winningCards += 1
-
     if (!isRecord(prize)) {
       return false
     }
@@ -289,6 +223,8 @@ export function isValidGameConfig(
     ) {
       return false
     }
+
+    winningCards += 1
   }
 
   return (
@@ -297,22 +233,14 @@ export function isValidGameConfig(
   )
 }
 
-/* ==========================================
-   NORMALIZE LEGACY CONFIGURATION
-========================================== */
-
 /*
-  Older configurations may not include
-  the scratchCount field.
+   Legacy local configurations can omit
+   scratchCount.
 
-  In that case, the default value of 25
-  is applied.
+   A missing local value defaults to 25.
 
-  Explicit invalid values are rejected.
-
-  We do not rename scratchCount in the
-  persisted object because the existing
-  API expects this field.
+   The API save verification is stricter:
+   it must explicitly return scratchCount.
 */
 
 export function normalizeGameConfig(
@@ -322,33 +250,40 @@ export function normalizeGameConfig(
     return null
   }
 
-  const scratchCount =
-    value.scratchCount === undefined
-      ? DEFAULT_REQUIRED_ATTEMPTS
-      : value.scratchCount
-
-  const normalized: unknown = {
+  const candidate: unknown = {
     ...value,
-    scratchCount,
+    scratchCount:
+      value.scratchCount === undefined
+        ? DEFAULT_SCRATCH_COUNT
+        : value.scratchCount,
   }
 
-  if (!isValidGameConfig(normalized)) {
+  if (!isValidGameConfig(candidate)) {
     return null
   }
 
-  return normalized
+  // Return only the supported configuration fields.
+  return {
+    enabled: candidate.enabled,
+    scratchCount: candidate.scratchCount,
+    cards: candidate.cards
+      .map(card => ({
+        cardId: card.cardId,
+        prize:
+          card.prize === null
+            ? null
+            : {
+                productId: card.prize.productId,
+                title: card.prize.title,
+                detail: card.prize.detail,
+                emoji: card.prize.emoji,
+              },
+      }))
+      .sort((a, b) => a.cardId - b.cardId),
+  }
 }
 
-/* ==========================================
-   CONFIGURATION COMPARISON
-========================================== */
-
-/*
-  Used to verify that the API persisted
-  the requested configuration.
-
-  Card order does not affect comparison.
-*/
+/* ===================== CONFIG COMPARISON ===================== */
 
 function sameGameConfig(
   first: GameConfig,
@@ -394,9 +329,7 @@ function sameGameConfig(
   })
 }
 
-/* ==========================================
-   STORAGE HELPERS
-========================================== */
+/* ===================== STORAGE ===================== */
 
 function notifyGameConfigChange(): void {
   if (typeof window === 'undefined') {
@@ -430,35 +363,27 @@ function persistGameConfig(
   notifyGameConfigChange()
 }
 
-/* ==========================================
-   READ GAME CONFIGURATION
-========================================== */
-
 export function readGameConfig(): GameConfig {
   if (typeof window === 'undefined') {
     return DEFAULT_GAME_CONFIG
   }
 
   try {
-    const stored =
-      window.localStorage.getItem(
-        GAME_CONFIG_KEY
-      )
+    const stored = window.localStorage.getItem(
+      GAME_CONFIG_KEY
+    )
 
     if (stored) {
-      const parsed: unknown =
-        JSON.parse(stored)
+      const parsed: unknown = JSON.parse(stored)
+      const config = normalizeGameConfig(parsed)
 
-      const normalized =
-        normalizeGameConfig(parsed)
-
-      if (normalized) {
-        return normalized
+      if (config) {
+        return config
       }
     }
   } catch (error) {
     console.warn(
-      'Unable to read game configuration:',
+      'Unable to read cached game settings:',
       error
     )
   }
@@ -466,99 +391,149 @@ export function readGameConfig(): GameConfig {
   return DEFAULT_GAME_CONFIG
 }
 
-/* ==========================================
-   PARSE API RESPONSE
-========================================== */
+/* ===================== API RESPONSE ===================== */
 
-function extractGameConfig(
+/*
+   Supported response formats:
+
+   { config: { enabled, scratchCount, cards } }
+
+   or
+
+   { enabled, scratchCount, cards }
+
+   Other response formats must be handled
+   explicitly in the backend or added here.
+*/
+
+function getRawApiConfig(
   response: unknown
-): GameConfig | null {
+): unknown {
   if (!isRecord(response)) {
     return null
   }
 
-  const data =
-    response as GameSettingsResponse
+  if (response.config !== undefined) {
+    return response.config
+  }
 
-  /*
-    Supported API response formats:
-
-    {
-      config: {
-        enabled,
-        scratchCount,
-        cards
-      }
-    }
-
-    OR:
-
-    {
-      enabled,
-      scratchCount,
-      cards
-    }
-  */
-
-  const rawConfig =
-    data.config !== undefined
-      ? data.config
-      : {
-          enabled: data.enabled,
-          scratchCount: data.scratchCount,
-          cards: data.cards,
-        }
-
-  return normalizeGameConfig(rawConfig)
+  return response
 }
 
-/* ==========================================
-   READ API ERROR
-========================================== */
+function parseApiConfig(
+  response: unknown,
+  requireScratchCount: boolean
+): ApiConfigResult {
+  const rawConfig = getRawApiConfig(response)
+
+  if (!isRecord(rawConfig)) {
+    return {
+      config: null,
+      scratchCountPresent: false,
+    }
+  }
+
+  const scratchCountPresent =
+    Object.prototype.hasOwnProperty.call(
+      rawConfig,
+      'scratchCount'
+    )
+
+  /*
+     During save verification, a missing
+     scratchCount is not accepted.
+
+     Otherwise a backend that drops the field
+     could appear to have saved the default 25.
+  */
+
+  if (
+    requireScratchCount &&
+    !scratchCountPresent
+  ) {
+    return {
+      config: null,
+      scratchCountPresent: false,
+    }
+  }
+
+  return {
+    config: normalizeGameConfig(rawConfig),
+    scratchCountPresent,
+  }
+}
+
+function extractGameConfig(
+  response: unknown
+): GameConfig | null {
+  return parseApiConfig(
+    response,
+    false
+  ).config
+}
+
+/* ===================== API ERRORS ===================== */
 
 async function readApiError(
   response: Response,
   fallback: string
 ): Promise<string> {
   try {
-    const errorData: unknown =
-      await response.json()
+    const data: unknown = await response.json()
 
-    if (isRecord(errorData)) {
+    if (isRecord(data)) {
       if (
-        typeof errorData.error === 'string' &&
-        errorData.error.trim()
+        typeof data.error === 'string' &&
+        data.error.trim()
       ) {
-        return errorData.error
+        return data.error
       }
 
       if (
-        typeof errorData.message === 'string' &&
-        errorData.message.trim()
+        typeof data.message === 'string' &&
+        data.message.trim()
       ) {
-        return errorData.message
+        return data.message
       }
     }
   } catch {
-    // Keep fallback message.
+    // Preserve fallback.
   }
 
   return fallback
 }
 
-/* ==========================================
-   FETCH LIVE GAME CONFIGURATION
-========================================== */
+function describeMismatch(
+  expected: GameConfig,
+  actual: GameConfig
+): string {
+  if (
+    expected.scratchCount !==
+    actual.scratchCount
+  ) {
+    return (
+      'The Games API did not preserve scratchCount. ' +
+      `Requested: ${expected.scratchCount}. ` +
+      `Returned: ${actual.scratchCount}. ` +
+      'Update the backend /api/games/settings ' +
+      'handler to store and return scratchCount.'
+    )
+  }
 
-/*
-  Public settings fetch.
+  if (expected.enabled !== actual.enabled) {
+    return (
+      'The Games API did not preserve ' +
+      'the game enabled/disabled setting.'
+    )
+  }
 
-  If the network request fails, return
-  the most recent locally cached config.
+  return (
+    'The Games API did not preserve all ' +
+    'winning-card and prize settings.'
+  )
+}
 
-  This fallback is for display/configuration
-  only. It must not authorize reward claims.
-*/
+/* ===================== FETCH CONFIG ===================== */
 
 export async function fetchGameConfig():
   Promise<GameConfig> {
@@ -567,11 +542,9 @@ export async function fetchGameConfig():
       GAME_SETTINGS_ENDPOINT,
       {
         method: 'GET',
-
         headers: {
           Accept: 'application/json',
         },
-
         cache: 'no-store',
       }
     )
@@ -582,15 +555,12 @@ export async function fetchGameConfig():
       )
     }
 
-    const data: unknown =
-      await response.json()
-
-    const config =
-      extractGameConfig(data)
+    const data: unknown = await response.json()
+    const config = extractGameConfig(data)
 
     if (!config) {
       throw new Error(
-        'The game API returned an invalid configuration.'
+        'The Games API returned invalid settings.'
       )
     }
 
@@ -599,7 +569,7 @@ export async function fetchGameConfig():
     return config
   } catch (error) {
     console.warn(
-      'Failed to fetch live game configuration:',
+      'Unable to fetch live game settings:',
       error
     )
 
@@ -607,26 +577,19 @@ export async function fetchGameConfig():
   }
 }
 
-/* ==========================================
-   SAVE GAME CONFIGURATION
-========================================== */
+/* ===================== SAVE CONFIG ===================== */
 
 /*
-  Save workflow:
+   Save sequence:
 
-  1. Validate all game settings.
-  2. Send authenticated PUT request.
-  3. Validate the API response.
-  4. Fetch settings again from the server.
-  5. Verify that the requested values
-     were actually persisted.
-  6. Update local cache only after
-     successful verification.
+   1. Validate the requested configuration.
+   2. Send authenticated PUT.
+   3. Validate any configuration returned by PUT.
+   4. Perform a fresh authenticated GET.
+   5. Compare the server response with the request.
+   6. Update local cache only after verification.
 
-  This verifies the configuration only.
-
-  It does NOT prove that the customer
-  scratch game counts completed cards.
+   This prevents a false "Saved" message.
 */
 
 export async function saveGameConfig(
@@ -634,7 +597,19 @@ export async function saveGameConfig(
 ): Promise<void> {
   if (!isValidGameConfig(config)) {
     throw new Error(
-      `Invalid game settings. Exactly ${REQUIRED_WINNING_CARDS} of the ${TOTAL_GAME_CARDS} cards must have valid prizes, and required completed attempts must be between ${MIN_REQUIRED_ATTEMPTS} and ${MAX_REQUIRED_ATTEMPTS}.`
+      'Invalid game settings. Exactly two of ' +
+      'the five cards must have valid prizes. ' +
+      `The scratch requirement must be between ` +
+      `${MIN_SCRATCH_COUNT} and ${MAX_SCRATCH_COUNT}.`
+    )
+  }
+
+  const requestedConfig =
+    normalizeGameConfig(config)
+
+  if (!requestedConfig) {
+    throw new Error(
+      'Unable to normalize game settings.'
     )
   }
 
@@ -652,86 +627,95 @@ export async function saveGameConfig(
       {
         method: 'PUT',
         headers,
-        body: JSON.stringify(config),
+        cache: 'no-store',
+        body: JSON.stringify(requestedConfig),
       }
     )
   } catch {
     throw new Error(
-      'Unable to connect to the game settings API. Please check your connection and try again.'
+      'Unable to connect to the Games API. ' +
+      'Check your connection and try again.'
     )
   }
 
   if (!response.ok) {
-    const errorMessage =
+    throw new Error(
       await readApiError(
         response,
-        'Failed to save game settings.'
+        `Unable to save game settings (${response.status}).`
       )
-
-    throw new Error(errorMessage)
+    )
   }
 
   /*
-    Validate any configuration returned
-    directly by the PUT request.
+     Some APIs return an empty successful
+     response. That is allowed.
+
+     If the API returns a configuration,
+     however, it must match the request.
   */
 
-  const responseText =
-    await response.text()
+  const responseText = await response.text()
 
   if (responseText.trim()) {
     let responseData: unknown
 
     try {
-      responseData =
-        JSON.parse(responseText)
+      responseData = JSON.parse(responseText)
     } catch {
       throw new Error(
-        'The game API returned an invalid JSON response.'
+        'The Games API returned invalid JSON ' +
+        'after the save request.'
       )
     }
 
     if (isRecord(responseData)) {
-      const hasReturnedConfig =
+      const hasConfig =
         responseData.config !== undefined ||
         (
           responseData.enabled !== undefined &&
           responseData.cards !== undefined
         )
 
-      if (hasReturnedConfig) {
-        const returnedConfig =
-          extractGameConfig(responseData)
+      if (hasConfig) {
+        const parsed = parseApiConfig(
+          responseData,
+          true
+        )
 
-        if (!returnedConfig) {
+        if (!parsed.scratchCountPresent) {
           throw new Error(
-            'The game API returned invalid saved settings.'
+            'The Games API omitted scratchCount ' +
+            'from its save response. The backend ' +
+            'must return the saved scratchCount.'
+          )
+        }
+
+        if (!parsed.config) {
+          throw new Error(
+            'The Games API returned invalid ' +
+            'saved game settings.'
           )
         }
 
         if (
           !sameGameConfig(
-            returnedConfig,
-            config
+            requestedConfig,
+            parsed.config
           )
         ) {
           throw new Error(
-            'The game API returned settings that do not match the requested configuration. Check backend persistence.'
+            describeMismatch(
+              requestedConfig,
+              parsed.config
+            )
           )
         }
       }
     }
   }
 
-  /*
-    IMPORTANT:
-
-    Do not trust only the PUT success
-    response.
-
-    Read the configuration again from
-    the server to verify persistence.
-  */
+  /* ===================== VERIFY SAVE ===================== */
 
   let verifyResponse: Response
 
@@ -740,72 +724,82 @@ export async function saveGameConfig(
       GAME_SETTINGS_ENDPOINT,
       {
         method: 'GET',
-
         headers: {
           Accept: 'application/json',
           ...getAdminAuthHeaders(),
         },
-
         cache: 'no-store',
       }
     )
   } catch {
     throw new Error(
-      'The save request was accepted, but the saved settings could not be verified. Please reload the settings before trying again.'
+      'The save request was accepted, but the ' +
+      'saved settings could not be verified. ' +
+      'Reload the admin settings before retrying.'
     )
   }
 
   if (!verifyResponse.ok) {
     throw new Error(
-      `The save request was accepted, but verification failed (${verifyResponse.status}).`
+      'The save request was accepted, but ' +
+      `verification failed (${verifyResponse.status}).`
     )
   }
 
   let verifyData: unknown
 
   try {
-    verifyData =
-      await verifyResponse.json()
+    verifyData = await verifyResponse.json()
   } catch {
     throw new Error(
-      'The verification API returned invalid JSON.'
+      'The Games API returned invalid JSON ' +
+      'during save verification.'
     )
   }
 
-  const verifiedConfig =
-    extractGameConfig(verifyData)
+  const verified = parseApiConfig(
+    verifyData,
+    true
+  )
 
-  if (!verifiedConfig) {
+  if (!verified.scratchCountPresent) {
     throw new Error(
-      'The verification API returned invalid game settings.'
+      'The Games API is not returning scratchCount. ' +
+      'Update /api/games/settings to read, store, ' +
+      'and return the saved scratchCount.'
+    )
+  }
+
+  if (!verified.config) {
+    throw new Error(
+      'The Games API returned invalid game ' +
+      'settings during save verification.'
     )
   }
 
   if (
     !sameGameConfig(
-      verifiedConfig,
-      config
+      requestedConfig,
+      verified.config
     )
   ) {
     throw new Error(
-      'The Games API did not persist all requested settings. Verify that the backend supports scratchCount as the required completed-attempt count.'
+      describeMismatch(
+        requestedConfig,
+        verified.config
+      )
     )
   }
 
   /*
-    Persist only the verified server
-    configuration.
-
-    This cache is not an authoritative
-    record of customer attempts.
+     Only the verified server configuration
+     is written to the local cache.
   */
 
-  persistGameConfig(verifiedConfig)
+  persistGameConfig(verified.config)
 }
 
-/* ==========================================
-   SUBSCRIBE TO GAME CONFIGURATION CHANGES
-========================================== */
+/* ===================== SUBSCRIPTIONS ===================== */
 
 export function subscribeGameConfig(
   callback: () => void
