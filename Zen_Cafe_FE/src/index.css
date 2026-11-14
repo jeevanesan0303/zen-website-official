@@ -11875,3 +11875,19 @@ html[data-theme='dark'] ::-webkit-scrollbar-thumb:hover{background:linear-gradie
     margin-top: 10px !important;
   }
 }
+/* Move ONLY Zen Café logo card below A Quiet Surprise */
+
+.v61-responsive-hero .video-hero-copy-block {
+  position: relative;
+}
+
+.v61-responsive-hero .video-hero-brand {
+  position: absolute !important;
+  top: 45px !important;
+  left: 0 !important;
+  right: auto !important;
+  bottom: auto !important;
+  transform: none !important;
+  margin: 0 !important;
+  z-index: 5;
+}
