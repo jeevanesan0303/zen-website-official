@@ -1,19 +1,19 @@
 
 import type { R2Bucket } from '@cloudflare/workers-types'
 
-/* ==========================================
+/* =========================================================
    ZEN CAFÉ — CLOUDFLARE WORKER
 
-   - Clean URLs
-   - API Proxy
-   - Static Assets
-   - Authenticated Product Image Upload
-   - Cloudflare R2 Product Images
-========================================== */
-
-/* ==========================================
-   ENVIRONMENT
-========================================== */
+   Features:
+   - Clean website URLs
+   - Backend API proxy
+   - Games settings API forwarding
+   - No-cache API responses
+   - Backend admin-session verification
+   - Authenticated product image upload
+   - Cloudflare R2 product image delivery
+   - Static website assets
+========================================================= */
 
 interface Env {
   ASSETS: {
@@ -29,13 +29,15 @@ interface Env {
   RESEND_FROM_EMAIL?: string
 }
 
-/* ==========================================
-   CONSTANTS
-========================================== */
+/* ===================== CONSTANTS ===================== */
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
-const MAX_MULTIPART_SIZE = MAX_IMAGE_SIZE + 64 * 1024
+const MAX_MULTIPART_SIZE =
+  MAX_IMAGE_SIZE + 64 * 1024
+
 const IMAGE_CACHE_SECONDS = 3600
+
+const ADMIN_AUTH_CHECK_PATH = '/api/admin/check'
 
 const ALLOWED_IMAGE_TYPES = new Map<string, string>([
   ['image/jpeg', 'jpg'],
@@ -43,33 +45,13 @@ const ALLOWED_IMAGE_TYPES = new Map<string, string>([
   ['image/webp', 'webp'],
 ])
 
-/*
-  Confirmed in server/auth.mjs:
-
-  GET /api/admin/check
-
-  The backend validates:
-  - Administrator session token
-  - PostgreSQL session record
-  - Session expiration
-  - Session revocation
-  - Active administrator account
-  - Administrator role
-*/
-
-const ADMIN_AUTH_CHECK_PATH = '/api/admin/check'
-
-/* ==========================================
-   WEBSITE ROUTES
-========================================== */
+/* ===================== WEBSITE ROUTES ===================== */
 
 const pageRoutes: Record<string, string> = {
   '/': '/index.html',
-
   '/admin': '/admin.html',
   '/admin/login': '/admin-login.html',
   '/admin-bookings': '/admin-bookings.html',
-
   '/zen-kitchen': '/zen-kitchen.html',
   '/offers': '/offers.html',
   '/register': '/register.html',
@@ -78,20 +60,16 @@ const pageRoutes: Record<string, string> = {
 
 const legacyRoutes: Record<string, string> = {
   '/index.html': '/',
-
   '/admin.html': '/admin',
   '/admin-login.html': '/admin/login',
   '/admin-bookings.html': '/admin-bookings',
-
   '/zen-kitchen.html': '/zen-kitchen',
   '/offers.html': '/offers',
   '/register.html': '/register',
   '/games.html': '/games',
 }
 
-/* ==========================================
-   RESPONSE HELPERS
-========================================== */
+/* ===================== JSON RESPONSE ===================== */
 
 function jsonResponse(
   data: Record<string, unknown>,
@@ -106,6 +84,8 @@ function jsonResponse(
   })
 }
 
+/* ===================== API DETECTION ===================== */
+
 function isApiPath(pathname: string): boolean {
   return (
     pathname === '/api' ||
@@ -113,16 +93,23 @@ function isApiPath(pathname: string): boolean {
   )
 }
 
-/* ==========================================
-   BACKEND URL BUILDER
-========================================== */
+function isGamesSettingsPath(
+  pathname: string,
+): boolean {
+  return (
+    pathname.replace(/\/+$/, '') ===
+    '/api/games/settings'
+  )
+}
+
+/* ===================== BACKEND URL ===================== */
 
 function buildBackendUrl(
   request: Request,
   env: Env,
   overridePath?: string,
 ): URL {
-  if (!env.API_V2_URL) {
+  if (!env.API_V2_URL?.trim()) {
     throw new Error(
       'Zen Café API URL is not configured.',
     )
@@ -130,6 +117,15 @@ function buildBackendUrl(
 
   const incomingUrl = new URL(request.url)
   const backendUrl = new URL(env.API_V2_URL)
+
+  if (
+    backendUrl.protocol !== 'https:' &&
+    backendUrl.protocol !== 'http:'
+  ) {
+    throw new Error(
+      'Invalid backend API URL protocol.',
+    )
+  }
 
   const basePath =
     backendUrl.pathname.replace(/\/+$/, '')
@@ -145,15 +141,13 @@ function buildBackendUrl(
   return backendUrl
 }
 
-/* ==========================================
-   API PROXY
-========================================== */
+/* ===================== API PROXY ===================== */
 
 async function proxyApi(
   request: Request,
   env: Env,
 ): Promise<Response> {
-  if (!env.API_V2_URL) {
+  if (!env.API_V2_URL?.trim()) {
     return jsonResponse(
       {
         success: false,
@@ -171,6 +165,12 @@ async function proxyApi(
       request,
       env,
     )
+
+    /*
+      Preserve authentication and request
+      content while allowing fetch to set
+      the correct upstream Host header.
+    */
 
     const headers = new Headers(request.headers)
 
@@ -192,12 +192,20 @@ async function proxyApi(
       },
     )
 
-    const response = await fetch(upstreamRequest)
+    /*
+      Do not cache API requests.
 
-    if (
-      !response.ok &&
-      response.status >= 500
-    ) {
+      The game configuration must be read
+      from the real backend.
+    */
+
+    const response = await fetch(upstreamRequest, {
+      cf: {
+        cacheTtl: 0,
+      },
+    } as RequestInit)
+
+    if (!response.ok && response.status >= 500) {
       console.error(
         '[Zen Café API] Upstream error:',
         request.method,
@@ -206,7 +214,54 @@ async function proxyApi(
       )
     }
 
-    return response
+    /*
+      Do not rewrite the API JSON.
+
+      In particular, scratchCount must be
+      returned by the real backend.
+
+      Adding a fake scratchCount here would
+      conceal a database persistence problem.
+    */
+
+    const responseHeaders = new Headers(
+      response.headers,
+    )
+
+    responseHeaders.set(
+      'Cache-Control',
+      'no-store, no-cache, must-revalidate',
+    )
+
+    responseHeaders.set(
+      'Pragma',
+      'no-cache',
+    )
+
+    responseHeaders.set(
+      'X-Content-Type-Options',
+      'nosniff',
+    )
+
+    if (
+      isGamesSettingsPath(incomingUrl.pathname)
+    ) {
+      responseHeaders.set(
+        'X-Zen-API-Route',
+        'games-settings-proxy',
+      )
+    }
+
+    /*
+      A new Response retains the original
+      status and response body.
+    */
+
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: responseHeaders,
+    })
   } catch (error) {
     console.error(
       '[Zen Café API] Proxy failure:',
@@ -224,14 +279,7 @@ async function proxyApi(
   }
 }
 
-/* ==========================================
-   ADMIN AUTHENTICATION
-
-   Validates the administrator using
-   the existing backend endpoint:
-
-   GET /api/admin/check
-========================================== */
+/* ===================== ADMIN AUTHENTICATION ===================== */
 
 async function verifyAdmin(
   request: Request,
@@ -240,11 +288,6 @@ async function verifyAdmin(
   if (!env.API_V2_URL) {
     return false
   }
-
-  /*
-    Support both authentication headers
-    used by src/admin-auth.ts.
-  */
 
   const authorization =
     request.headers.get('Authorization')
@@ -297,10 +340,9 @@ async function verifyAdmin(
     )
 
     /*
-      Only HTTP 200 is accepted.
-
-      The backend performs authoritative
-      PostgreSQL admin-session validation.
+      The backend remains responsible for
+      checking the admin session, expiration,
+      revocation and permissions.
     */
 
     return response.status === 200
@@ -314,9 +356,7 @@ async function verifyAdmin(
   }
 }
 
-/* ==========================================
-   PRODUCT IMAGE ROUTES
-========================================== */
+/* ===================== PRODUCT UPLOAD ID ===================== */
 
 function getProductUploadId(
   pathname: string,
@@ -335,6 +375,8 @@ function getProductUploadId(
     return null
   }
 }
+
+/* ===================== PRODUCT IMAGE KEY ===================== */
 
 function getProductImageKey(
   pathname: string,
@@ -371,9 +413,7 @@ function getProductImageKey(
   }
 }
 
-/* ==========================================
-   IMAGE SIGNATURE VALIDATION
-========================================== */
+/* ===================== IMAGE SIGNATURE ===================== */
 
 function hasValidImageSignature(
   bytes: Uint8Array,
@@ -424,14 +464,7 @@ function hasValidImageSignature(
   return false
 }
 
-/* ==========================================
-   PRODUCT IMAGE UPLOAD
-
-   POST /api/products/:id/image
-
-   FormData field:
-   image
-========================================== */
+/* ===================== PRODUCT IMAGE UPLOAD ===================== */
 
 async function uploadProductImage(
   request: Request,
@@ -450,8 +483,8 @@ async function uploadProductImage(
   }
 
   /*
-    Validate administrator credentials
-    before processing the uploaded file.
+    Verify the admin before reading
+    or processing the uploaded file.
   */
 
   const authorized = await verifyAdmin(
@@ -620,9 +653,8 @@ async function uploadProductImage(
     }
 
     /*
-      Generate a unique image key so
-      replacing an image does not reuse
-      an old cached URL.
+      A unique key prevents stale images
+      from being reused after replacement.
     */
 
     const key =
@@ -687,12 +719,7 @@ async function uploadProductImage(
   }
 }
 
-/* ==========================================
-   PUBLIC PRODUCT IMAGE DELIVERY
-
-   GET /api/product-images/:key
-   HEAD /api/product-images/:key
-========================================== */
+/* ===================== PRODUCT IMAGE DELIVERY ===================== */
 
 async function serveProductImage(
   request: Request,
@@ -708,28 +735,75 @@ async function serveProductImage(
     )
   }
 
+  if (!key.startsWith('products/')) {
+    return new Response(
+      'Invalid image key.',
+      {
+        status: 400,
+      },
+    )
+  }
+
   try {
-    if (!key.startsWith('products/')) {
-      return new Response(
-        'Invalid image key.',
-        {
-          status: 400,
-        },
-      )
-    }
-
     /*
-      HEAD:
-      Read metadata only.
-
-      GET:
-      Read image content.
+      HEAD reads metadata only.
+      GET retrieves image data.
     */
 
+    if (request.method === 'HEAD') {
+      const object =
+        await env.PRODUCTS_BUCKET.head(key)
+
+      if (!object) {
+        return new Response(
+          'Product image not found.',
+          {
+            status: 404,
+          },
+        )
+      }
+
+      const headers = new Headers()
+
+      headers.set(
+        'Content-Type',
+        object.httpMetadata?.contentType ||
+          'application/octet-stream',
+      )
+
+      headers.set(
+        'Cache-Control',
+        `public, max-age=${IMAGE_CACHE_SECONDS}`,
+      )
+
+      headers.set(
+        'X-Content-Type-Options',
+        'nosniff',
+      )
+
+      headers.set(
+        'Content-Disposition',
+        'inline',
+      )
+
+      headers.set(
+        'ETag',
+        object.httpEtag,
+      )
+
+      headers.set(
+        'Content-Length',
+        String(object.size),
+      )
+
+      return new Response(null, {
+        status: 200,
+        headers,
+      })
+    }
+
     const object =
-      request.method === 'HEAD'
-        ? await env.PRODUCTS_BUCKET.head(key)
-        : await env.PRODUCTS_BUCKET.get(key)
+      await env.PRODUCTS_BUCKET.get(key)
 
     if (!object) {
       return new Response(
@@ -741,25 +815,14 @@ async function serveProductImage(
     }
 
     const headers = new Headers()
+
     const metadata = object.httpMetadata
 
-    /*
-      Assign metadata manually to avoid
-      conflicting DOM and Cloudflare
-      Headers types.
-    */
-
-    if (metadata?.contentType) {
-      headers.set(
-        'Content-Type',
-        metadata.contentType,
-      )
-    } else {
-      headers.set(
-        'Content-Type',
+    headers.set(
+      'Content-Type',
+      metadata?.contentType ||
         'application/octet-stream',
-      )
-    }
+    )
 
     if (metadata?.contentLanguage) {
       headers.set(
@@ -800,35 +863,8 @@ async function serveProductImage(
       String(object.size),
     )
 
-    if (request.method === 'HEAD') {
-      return new Response(null, {
-        status: 200,
-        headers,
-      })
-    }
-
-    /*
-      GET requires R2ObjectBody.
-
-      A separate typed GET branch avoids
-      the R2Object / R2ObjectBody union
-      TypeScript error.
-    */
-
-    const imageObject =
-      await env.PRODUCTS_BUCKET.get(key)
-
-    if (!imageObject) {
-      return new Response(
-        'Product image not found.',
-        {
-          status: 404,
-        },
-      )
-    }
-
     const imageBytes =
-      await imageObject.arrayBuffer()
+      await object.arrayBuffer()
 
     return new Response(
       imageBytes,
@@ -852,9 +888,7 @@ async function serveProductImage(
   }
 }
 
-/* ==========================================
-   CLEAN URL REDIRECT
-========================================== */
+/* ===================== CLEAN URL REDIRECT ===================== */
 
 function redirectToCleanUrl(
   request: Request,
@@ -870,9 +904,7 @@ function redirectToCleanUrl(
   )
 }
 
-/* ==========================================
-   STATIC PAGE HANDLER
-========================================== */
+/* ===================== STATIC PAGE HANDLER ===================== */
 
 async function servePage(
   request: Request,
@@ -892,9 +924,7 @@ async function servePage(
   )
 }
 
-/* ==========================================
-   CLOUDFLARE WORKER ENTRY
-========================================== */
+/* ===================== WORKER ENTRY ===================== */
 
 export default {
   async fetch(
@@ -904,9 +934,7 @@ export default {
     const url = new URL(request.url)
     const pathname = url.pathname
 
-    /* --------------------------------------
-       1. PRODUCT IMAGE UPLOAD
-    -------------------------------------- */
+    /* 1. PRODUCT IMAGE UPLOAD */
 
     const productId =
       getProductUploadId(pathname)
@@ -922,9 +950,7 @@ export default {
       )
     }
 
-    /* --------------------------------------
-       2. PUBLIC PRODUCT IMAGE DELIVERY
-    -------------------------------------- */
+    /* 2. PUBLIC PRODUCT IMAGE DELIVERY */
 
     const imageKey =
       getProductImageKey(pathname)
@@ -943,17 +969,13 @@ export default {
       )
     }
 
-    /* --------------------------------------
-       3. ALL OTHER API REQUESTS
-    -------------------------------------- */
+    /* 3. ALL BACKEND API REQUESTS */
 
     if (isApiPath(pathname)) {
       return proxyApi(request, env)
     }
 
-    /* --------------------------------------
-       4. STATIC ASSET BINDING
-    -------------------------------------- */
+    /* 4. STATIC ASSET BINDING */
 
     if (!env.ASSETS) {
       return new Response(
@@ -964,9 +986,7 @@ export default {
       )
     }
 
-    /* --------------------------------------
-       5. LEGACY HTML REDIRECTS
-    -------------------------------------- */
+    /* 5. LEGACY HTML REDIRECTS */
 
     if (
       request.method === 'GET' ||
@@ -983,9 +1003,7 @@ export default {
       }
     }
 
-    /* --------------------------------------
-       6. CLEAN PAGE ROUTES
-    -------------------------------------- */
+    /* 6. CLEAN PAGE ROUTES */
 
     const normalizedPath =
       pathname.length > 1
@@ -1003,9 +1021,7 @@ export default {
       )
     }
 
-    /* --------------------------------------
-       7. STATIC ASSETS
-    -------------------------------------- */
+    /* 7. STATIC ASSETS */
 
     return env.ASSETS.fetch(request)
   },
