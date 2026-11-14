@@ -11850,3 +11850,28 @@ html[data-theme='dark'] ::-webkit-scrollbar-thumb:hover{background:linear-gradie
   .zen-header-actions:not(#zen-x){gap:6px!important}
   .zen-mobile-brand-button small:not(#zen-x){letter-spacing:.1em!important}
 }
+/* ==========================================
+   ZEN HERO — BRAND BELOW QUIET SURPRISE
+   ========================================== */
+
+.v61-responsive-hero .video-hero-brand {
+  position: relative !important;
+  top: auto !important;
+  left: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  transform: none !important;
+  margin-top: 14px !important;
+  margin-bottom: 0 !important;
+}
+
+/* Preserve the kicker's existing layout spacing */
+.v61-responsive-hero .video-hero-kicker {
+  margin-top: 0 !important;
+}
+
+@media (max-width: 640px) {
+  .v61-responsive-hero .video-hero-brand {
+    margin-top: 10px !important;
+  }
+}

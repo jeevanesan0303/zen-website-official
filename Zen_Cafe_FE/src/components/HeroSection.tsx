@@ -213,16 +213,14 @@ export default function HeroSection(){
   </p>
 
   <div className="video-hero-brand">
-    <img
-      src="/assets/zen-logo.png"
-      alt="Zen Café logo"
-    />
-
+    <img src="/assets/zen-logo.png" alt="Zen Café logo" />
     <div>
       <b>ZEN CAFÉ · JAFFNA</b>
       <span>Café · Party room</span>
     </div>
   </div>
+
+  {/* Keep your existing tiger animation here */}
         
 <div
   className="hero-meet-video-shell"
