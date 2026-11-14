@@ -26,6 +26,7 @@ import {
 
 import ThemeToggle from './components/ThemeToggle'
 import { useSiteTheme } from './theme'
+
 import {
   readGameConfig,
   fetchGameConfig,
@@ -39,36 +40,65 @@ import {
 
 import './games.css'
 
-/* ==========================================
+/* =========================================================
    ZEN CAFÉ — SCRATCH & WIN
 
-   CUSTOMER EXPERIENCE
+   CUSTOMER FLOW
 
-   - Choose one of five cards.
-   - Scratch the SAME card.
-   - Valid scratch gestures are counted
-     internally.
-   - No counters are shown to customers.
-   - The result is revealed automatically
-     after the admin-configured number
-     of valid scratching gestures.
+   1. Customer selects one of five cards.
+   2. The selected card flips.
+   3. Customer scratches one continuous surface.
+   4. Scratch movements are counted internally.
+   5. No scratch counter is displayed.
+   6. The result appears automatically when the
+      configured scratch requirement is reached.
 
    IMPORTANT
 
-   The reward is not placed underneath
-   the scratch coating until the required
-   number of gestures is completed.
-========================================== */
+   The customer does not need to release their
+   finger or mouse after every scratch.
+
+   The coating uses scratch-mark rendering rather
+   than fully erasing itself before the result is
+   unlocked. This prevents the empty-card problem.
+========================================================= */
 
 const SCRATCH_WIDTH = 480
 const SCRATCH_HEIGHT = 280
-const BRUSH_SIZE = 38
 
-// Minimum movement for a valid scratching gesture.
-const MIN_GESTURE_DISTANCE = 22
+/*
+   Each meaningful 65px of scratch movement counts
+   as one internal scratch unit.
 
-// Avoid counting a simple tap as a scratch.
-const MIN_GESTURE_DURATION_MS = 35
+   With the default requirement of 25:
+   25 × 65 = 1625 canvas pixels of movement.
+
+   Movement is measured in canvas coordinates,
+   so the interaction behaves consistently on
+   desktop and mobile.
+*/
+
+const DISTANCE_PER_SCRATCH = 65
+
+/*
+   Avoid counting tiny movements and jitter.
+*/
+
+const MIN_POINTER_MOVEMENT = 1.5
+
+/*
+   Limit large pointer jumps so a single
+   browser event cannot generate excessive
+   scratch progress.
+*/
+
+const MAX_SEGMENT_DISTANCE = 90
+
+/*
+   Brush sizes for the scratch effect.
+*/
+
+const SCRATCH_BRUSH_SIZE = 24
 
 const cards = [
   {
@@ -150,12 +180,48 @@ const extraLinks = [
 ] as const
 
 const floatingItems = [
-  { emoji: '🎲', x: 12, y: 17, size: 30, delay: -2 },
-  { emoji: '🎮', x: 91, y: 37, size: 34, delay: -6 },
-  { emoji: '✨', x: 6, y: 61, size: 23, delay: -3 },
-  { emoji: '🎲', x: 87, y: 67, size: 32, delay: -8 },
-  { emoji: '🕹️', x: 8, y: 87, size: 26, delay: -5 },
-  { emoji: '👾', x: 92, y: 91, size: 25, delay: -10 },
+  {
+    emoji: '🎲',
+    x: 12,
+    y: 17,
+    size: 30,
+    delay: -2,
+  },
+  {
+    emoji: '🎮',
+    x: 91,
+    y: 37,
+    size: 34,
+    delay: -6,
+  },
+  {
+    emoji: '✨',
+    x: 6,
+    y: 61,
+    size: 23,
+    delay: -3,
+  },
+  {
+    emoji: '🎲',
+    x: 87,
+    y: 67,
+    size: 32,
+    delay: -8,
+  },
+  {
+    emoji: '🕹️',
+    x: 8,
+    y: 87,
+    size: 26,
+    delay: -5,
+  },
+  {
+    emoji: '👾',
+    x: 92,
+    y: 91,
+    size: 25,
+    delay: -10,
+  },
 ]
 
 const confettiColors = [
@@ -198,9 +264,9 @@ type ScratchCardProps = {
   onReveal: () => void
 }
 
-/* ==========================================
+/* =========================================================
    GAME CONFIGURATION
-========================================== */
+========================================================= */
 
 function getRequiredScratches(
   config: GameConfig
@@ -219,10 +285,10 @@ function getRequiredScratches(
 }
 
 /*
-  Preserve admin-defined winning positions.
+   Preserve the admin-defined winning cards.
 
-  The selected card's prize is determined
-  using the existing game configuration.
+   A card with a configured prize wins.
+   A card without a prize loses.
 */
 
 function createResult(
@@ -235,23 +301,33 @@ function createResult(
     card => card.cardId === cardId
   )
 
-  if (!config.enabled || !selectedCard?.prize) {
-    return { kind: 'lose' }
+  if (
+    !config.enabled ||
+    !selectedCard?.prize
+  ) {
+    return {
+      kind: 'lose',
+    }
   }
 
   return {
     kind: 'win',
-    offer: { ...selectedCard.prize },
+    offer: {
+      ...selectedCard.prize,
+    },
   }
 }
 
-/* ==========================================
-   GAMING BACKGROUND
-========================================== */
+/* =========================================================
+   BACKGROUND
+========================================================= */
 
 function GamingBackground() {
   return (
-    <div className="zg-background" aria-hidden="true">
+    <div
+      className="zg-background"
+      aria-hidden="true"
+    >
       <div className="zg-grid" />
 
       <div className="zg-orb zg-orb-purple" />
@@ -262,18 +338,20 @@ function GamingBackground() {
         <div className="zg-scene-wall" />
 
         <div className="zg-scene-posters">
-          {cards.slice(0, 3).map((card, index) => (
-            <div
-              className="zg-scene-poster"
-              key={index}
-            >
-              <img
-                src={card.image}
-                alt=""
-                draggable={false}
-              />
-            </div>
-          ))}
+          {cards
+            .slice(0, 3)
+            .map((card, index) => (
+              <div
+                className="zg-scene-poster"
+                key={index}
+              >
+                <img
+                  src={card.image}
+                  alt=""
+                  draggable={false}
+                />
+              </div>
+            ))}
         </div>
 
         <div className="zg-scene-monitor">
@@ -308,58 +386,77 @@ function GamingBackground() {
       </div>
 
       <div className="zg-neon-trails">
-        {Array.from({ length: 6 }, (_, index) => (
-          <span
-            key={index}
-            className={`zg-neon-trail trail-${index % 3}`}
-            style={{
-              top: `${17 + index * 15}%`,
-              animationDelay: `${-index * 3.1}s`,
-              animationDuration: `${15 + index * 1.4}s`,
-              animationDirection:
-                index % 2 ? 'reverse' : 'normal',
-            }}
-          />
-        ))}
+        {Array.from(
+          { length: 6 },
+          (_, index) => (
+            <span
+              key={index}
+              className={`zg-neon-trail trail-${index % 3}`}
+              style={{
+                top: `${17 + index * 15}%`,
+                animationDelay:
+                  `${-index * 3.1}s`,
+                animationDuration:
+                  `${15 + index * 1.4}s`,
+                animationDirection:
+                  index % 2
+                    ? 'reverse'
+                    : 'normal',
+              }}
+            />
+          )
+        )}
       </div>
 
       <div className="zg-floating-items">
-        {floatingItems.map((item, index) => (
-          <span
-            key={index}
-            style={{
-              left: `${item.x}%`,
-              top: `${item.y}%`,
-              fontSize: `${item.size}px`,
-              animationDelay: `${item.delay}s`,
-              animationDuration: `${11 + index}s`,
-            }}
-          >
-            {item.emoji}
-          </span>
-        ))}
+        {floatingItems.map(
+          (item, index) => (
+            <span
+              key={index}
+              style={{
+                left: `${item.x}%`,
+                top: `${item.y}%`,
+                fontSize:
+                  `${item.size}px`,
+                animationDelay:
+                  `${item.delay}s`,
+                animationDuration:
+                  `${11 + index}s`,
+              }}
+            >
+              {item.emoji}
+            </span>
+          )
+        )}
       </div>
 
       <div className="zg-sparks">
-        {Array.from({ length: 16 }, (_, index) => (
-          <i
-            key={index}
-            style={{
-              left: `${(index * 31 + 7) % 100}%`,
-              top: `${(index * 23 + 9) % 100}%`,
-              animationDelay: `${-(index % 7)}s`,
-              animationDuration: `${4 + (index % 4)}s`,
-            }}
-          />
-        ))}
+        {Array.from(
+          { length: 16 },
+          (_, index) => (
+            <i
+              key={index}
+              style={{
+                left:
+                  `${(index * 31 + 7) % 100}%`,
+                top:
+                  `${(index * 23 + 9) % 100}%`,
+                animationDelay:
+                  `${-(index % 7)}s`,
+                animationDuration:
+                  `${4 + (index % 4)}s`,
+              }}
+            />
+          )
+        )}
       </div>
     </div>
   )
 }
 
-/* ==========================================
+/* =========================================================
    WIN CELEBRATION
-========================================== */
+========================================================= */
 
 function WinCelebration() {
   return (
@@ -369,56 +466,66 @@ function WinCelebration() {
     >
       <div className="zg-celebration-glow" />
 
-      {Array.from({ length: 64 }, (_, index) => {
-        const style = {
-          left: `${(index * 37 + 11) % 100}%`,
-          width: `${6 + (index % 5)}px`,
-          height: `${9 + (index % 7)}px`,
-          backgroundColor:
-            confettiColors[
-              index % confettiColors.length
-            ],
-          borderRadius:
-            index % 3 === 0 ? '50%' : '2px',
-          animationDelay:
-            `${(index % 12) * 0.055}s`,
-          animationDuration:
-            `${2.6 + (index % 6) * 0.22}s`,
-          '--drift':
-            `${((index * 29) % 220) - 110}px`,
-          '--spin':
-            `${index % 2 === 0 ? 720 : -720}deg`,
-        } as CSSProperties
+      {Array.from(
+        { length: 64 },
+        (_, index) => {
+          const style = {
+            left:
+              `${(index * 37 + 11) % 100}%`,
+            width:
+              `${6 + (index % 5)}px`,
+            height:
+              `${9 + (index % 7)}px`,
+            backgroundColor:
+              confettiColors[
+                index %
+                  confettiColors.length
+              ],
+            borderRadius:
+              index % 3 === 0
+                ? '50%'
+                : '2px',
+            animationDelay:
+              `${(index % 12) * 0.055}s`,
+            animationDuration:
+              `${2.6 + (index % 6) * 0.22}s`,
+            '--drift':
+              `${((index * 29) % 220) - 110}px`,
+            '--spin':
+              `${
+                index % 2 === 0
+                  ? 720
+                  : -720
+              }deg`,
+          } as CSSProperties
 
-        return (
-          <span
-            key={index}
-            className="zg-confetti"
-            style={style}
-          />
-        )
-      })}
+          return (
+            <span
+              key={index}
+              className="zg-confetti"
+              style={style}
+            />
+          )
+        }
+      )}
     </div>
   )
 }
 
-/* ==========================================
+/* =========================================================
    SCRATCH CARD
 
-   ONE CARD — HIDDEN SCRATCH COUNTER
+   CORRECTED INTERACTION
 
-   1. One coating is drawn initially.
-   2. The customer scratches this coating.
-   3. Each valid gesture increments a
-      private counter.
-   4. No counter is displayed.
-   5. The coating never resets.
-   6. The reward is revealed only after
-      the required number of gestures.
-
-   The result is deliberately NOT visible
-   beneath the coating before completion.
-========================================== */
+   - One card.
+   - One continuous scratch surface.
+   - Mouse and touch supported.
+   - No customer-facing scratch count.
+   - No progress bar.
+   - No "clear card" button.
+   - Continuous movement counts.
+   - Automatic result reveal.
+========================================================= */
 
 function ScratchCard({
   result,
@@ -427,23 +534,43 @@ function ScratchCard({
   requiredScratches,
   onReveal,
 }: ScratchCardProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const canvasRef =
+    useRef<HTMLCanvasElement>(null)
 
-  const activePointerRef = useRef<number | null>(null)
-  const previousPointRef = useRef<Point | null>(null)
+  const activePointerRef =
+    useRef<number | null>(null)
 
-  const gestureDistanceRef = useRef(0)
-  const gestureStartTimeRef = useRef(0)
+  const previousPointRef =
+    useRef<Point | null>(null)
 
-  const completedGesturesRef = useRef(0)
-  const completedRef = useRef(false)
+  const totalDistanceRef =
+    useRef(0)
 
-  const revealTimerRef = useRef<number | null>(null)
+  const completedRef =
+    useRef(false)
 
-  const [canvasUnavailable, setCanvasUnavailable] =
+  const revealTimerRef =
+    useRef<number | null>(null)
+
+  const onRevealRef =
+    useRef(onReveal)
+
+  const [finishing, setFinishing] =
     useState(false)
 
-  const [finishing, setFinishing] = useState(false)
+  const [
+    canvasUnavailable,
+    setCanvasUnavailable,
+  ] = useState(false)
+
+  /*
+     Keep callback current without
+     restarting the scratch surface.
+  */
+
+  useEffect(() => {
+    onRevealRef.current = onReveal
+  }, [onReveal])
 
   const target = Math.max(
     MIN_SCRATCH_COUNT,
@@ -456,21 +583,24 @@ function ScratchCard({
   )
 
   /*
-    Draw a single coating.
-
-    This is called only when the selected
-    scratch card is initialized.
+     This is the total movement needed
+     to reveal the result.
   */
+
+  const requiredDistance =
+    target * DISTANCE_PER_SCRATCH
+
+  /* -------------------------------------------------------
+     DRAW SCRATCH COATING
+  ------------------------------------------------------- */
 
   const drawCoating = useCallback(() => {
     const canvas = canvasRef.current
 
-    if (!canvas) {
-      setCanvasUnavailable(true)
-      return
-    }
+    if (!canvas) return
 
-    const context = canvas.getContext('2d')
+    const context =
+      canvas.getContext('2d')
 
     if (!context) {
       setCanvasUnavailable(true)
@@ -479,7 +609,8 @@ function ScratchCard({
 
     setCanvasUnavailable(false)
 
-    context.globalCompositeOperation = 'source-over'
+    context.globalCompositeOperation =
+      'source-over'
 
     context.clearRect(
       0,
@@ -488,17 +619,33 @@ function ScratchCard({
       canvas.height
     )
 
-    const gradient = context.createLinearGradient(
+    const gradient =
+      context.createLinearGradient(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      )
+
+    gradient.addColorStop(
       0,
-      0,
-      canvas.width,
-      canvas.height
+      '#7745bd'
     )
 
-    gradient.addColorStop(0, '#7745bd')
-    gradient.addColorStop(0.3, '#b985f0')
-    gradient.addColorStop(0.55, '#e2c9ff')
-    gradient.addColorStop(1, '#8b4bc6')
+    gradient.addColorStop(
+      0.3,
+      '#b985f0'
+    )
+
+    gradient.addColorStop(
+      0.55,
+      '#e2c9ff'
+    )
+
+    gradient.addColorStop(
+      1,
+      '#8b4bc6'
+    )
 
     context.fillStyle = gradient
 
@@ -509,7 +656,10 @@ function ScratchCard({
       canvas.height
     )
 
-    // Decorative dots.
+    /*
+       Decorative pattern.
+    */
+
     for (
       let y = 12;
       y < canvas.height;
@@ -537,9 +687,12 @@ function ScratchCard({
       }
     }
 
-    // Decorative inner border.
+    /*
+       Inner border.
+    */
+
     context.strokeStyle =
-      'rgba(255, 255, 255, 0.5)'
+      'rgba(255,255,255,0.5)'
 
     context.lineWidth = 1
 
@@ -553,7 +706,8 @@ function ScratchCard({
     context.textAlign = 'center'
     context.fillStyle = '#35204f'
 
-    context.font = '600 14px system-ui'
+    context.font =
+      '600 14px system-ui'
 
     context.fillText(
       'ZEN LUCKY TABLE',
@@ -561,7 +715,8 @@ function ScratchCard({
       63
     )
 
-    context.font = '34px Georgia'
+    context.font =
+      '34px Georgia'
 
     context.fillText(
       'Scratch & discover',
@@ -569,7 +724,8 @@ function ScratchCard({
       124
     )
 
-    context.font = '600 17px system-ui'
+    context.font =
+      '600 17px system-ui'
 
     context.fillText(
       'SCRATCH HERE',
@@ -577,7 +733,8 @@ function ScratchCard({
       166
     )
 
-    context.font = '14px system-ui'
+    context.font =
+      '14px system-ui'
 
     context.fillText(
       'Your surprise is waiting',
@@ -585,58 +742,63 @@ function ScratchCard({
       196
     )
 
-    context.font = '22px Georgia'
+    context.font =
+      '22px Georgia'
 
     context.fillText(
       '✦',
       canvas.width / 2,
       237
     )
-
-    context.globalCompositeOperation =
-      'destination-out'
   }, [])
 
-  /*
-    Initialize one game round.
-
-    A new game round remounts this component
-    using its React key.
-  */
+  /* -------------------------------------------------------
+     INITIALIZE SCRATCH ROUND
+  ------------------------------------------------------- */
 
   useEffect(() => {
-    completedGesturesRef.current = 0
+    totalDistanceRef.current = 0
+
     completedRef.current = false
 
     activePointerRef.current = null
-    previousPointRef.current = null
 
-    gestureDistanceRef.current = 0
-    gestureStartTimeRef.current = 0
+    previousPointRef.current = null
 
     drawCoating()
 
     return () => {
-      if (revealTimerRef.current !== null) {
-        window.clearTimeout(revealTimerRef.current)
+      if (
+        revealTimerRef.current !== null
+      ) {
+        window.clearTimeout(
+          revealTimerRef.current
+        )
+
         revealTimerRef.current = null
       }
     }
   }, [drawCoating])
 
-  /*
-    Convert pointer coordinates to the
-    internal canvas dimensions.
-  */
+  /* -------------------------------------------------------
+     POINTER COORDINATES
+
+     Works with:
+     - Mouse
+     - Touchscreen
+     - Apple Pencil / stylus
+  ------------------------------------------------------- */
 
   const getPointerPoint = (
-    event: ReactPointerEvent<HTMLCanvasElement>
+    event:
+      ReactPointerEvent<HTMLCanvasElement>
   ): Point | null => {
     const canvas = canvasRef.current
 
     if (!canvas) return null
 
-    const rect = canvas.getBoundingClientRect()
+    const rect =
+      canvas.getBoundingClientRect()
 
     if (
       rect.width <= 0 ||
@@ -645,116 +807,55 @@ function ScratchCard({
       return null
     }
 
+    const x =
+      (
+        (event.clientX - rect.left) /
+        rect.width
+      ) * canvas.width
+
+    const y =
+      (
+        (event.clientY - rect.top) /
+        rect.height
+      ) * canvas.height
+
     return {
       x: Math.max(
         0,
-        Math.min(
-          canvas.width,
-          (
-            (event.clientX - rect.left) /
-            rect.width
-          ) * canvas.width
-        )
+        Math.min(canvas.width, x)
       ),
+
       y: Math.max(
         0,
-        Math.min(
-          canvas.height,
-          (
-            (event.clientY - rect.top) /
-            rect.height
-          ) * canvas.height
-        )
+        Math.min(canvas.height, y)
       ),
     }
   }
 
-  /*
-    Draw a rounded erasing stroke.
+  /* -------------------------------------------------------
+     FINISH GAME
 
-    The canvas itself contains the scratch
-    coating. The area underneath displays
-    a neutral mystery surface, not a prize.
-  */
-
-  const eraseToPoint = (
-    event: ReactPointerEvent<HTMLCanvasElement>
-  ) => {
-    if (
-      !enabled ||
-      revealed ||
-      completedRef.current
-    ) {
-      return
-    }
-
-    const canvas = canvasRef.current
-    const context = canvas?.getContext('2d')
-    const point = getPointerPoint(event)
-
-    if (
-      !canvas ||
-      !context ||
-      !point
-    ) {
-      return
-    }
-
-    const previous =
-      previousPointRef.current ?? point
-
-    const dx = point.x - previous.x
-    const dy = point.y - previous.y
-
-    const distance = Math.hypot(dx, dy)
-
-    gestureDistanceRef.current += distance
-
-    context.globalCompositeOperation =
-      'destination-out'
-
-    context.lineWidth = BRUSH_SIZE
-    context.lineCap = 'round'
-    context.lineJoin = 'round'
-
-    context.beginPath()
-    context.moveTo(previous.x, previous.y)
-    context.lineTo(point.x, point.y)
-    context.stroke()
-
-    // Make the initial touch visible.
-    context.beginPath()
-
-    context.arc(
-      point.x,
-      point.y,
-      BRUSH_SIZE / 2,
-      0,
-      Math.PI * 2
-    )
-
-    context.fillStyle = '#000000'
-    context.fill()
-
-    previousPointRef.current = point
-  }
-
-  /*
-    Complete the game after the required
-    number of valid gestures.
-
-    This does not create another coating.
-  */
+     Called only after the configured
+     scratch distance is completed.
+  ------------------------------------------------------- */
 
   const finishGame = () => {
-    if (completedRef.current) return
+    if (completedRef.current) {
+      return
+    }
 
     completedRef.current = true
+
+    activePointerRef.current = null
+
+    previousPointRef.current = null
 
     setFinishing(true)
 
     const canvas = canvasRef.current
-    const context = canvas?.getContext('2d')
+
+    const context =
+      canvas?.getContext('2d')
 
     if (canvas && context) {
       context.clearRect(
@@ -765,52 +866,220 @@ function ScratchCard({
       )
     }
 
-    // Brief delay for a smooth final reveal.
-    revealTimerRef.current = window.setTimeout(() => {
-      revealTimerRef.current = null
-      onReveal()
-    }, 300)
+    if (
+      revealTimerRef.current !== null
+    ) {
+      window.clearTimeout(
+        revealTimerRef.current
+      )
+    }
+
+    revealTimerRef.current =
+      window.setTimeout(() => {
+        revealTimerRef.current = null
+
+        onRevealRef.current()
+      }, 350)
   }
 
-  /*
-    Count one valid gesture.
+  /* -------------------------------------------------------
+     DRAW SCRATCH MARKS
 
-    A gesture is a pointer-down, meaningful
-    movement, and pointer-up sequence.
+     IMPORTANT:
 
-    Merely tapping the card is not enough.
-  */
+     Instead of erasing the coating
+     completely, we draw realistic
+     scratch marks over it.
 
-  const completeGesture = () => {
+     This ensures the customer never
+     sees an empty card while the
+     reward is still locked.
+  ------------------------------------------------------- */
+
+  const drawScratchStroke = (
+    from: Point,
+    to: Point
+  ) => {
+    const canvas = canvasRef.current
+
+    const context =
+      canvas?.getContext('2d')
+
+    if (!context) return
+
+    context.save()
+
+    context.globalCompositeOperation =
+      'source-over'
+
+    /*
+       Main scratch mark.
+    */
+
+    context.beginPath()
+
+    context.moveTo(
+      from.x,
+      from.y
+    )
+
+    context.lineTo(
+      to.x,
+      to.y
+    )
+
+    context.lineWidth =
+      SCRATCH_BRUSH_SIZE
+
+    context.lineCap = 'round'
+    context.lineJoin = 'round'
+
+    context.strokeStyle =
+      'rgba(52, 22, 87, 0.52)'
+
+    context.stroke()
+
+    /*
+       Metallic highlight.
+    */
+
+    context.beginPath()
+
+    context.moveTo(
+      from.x,
+      from.y
+    )
+
+    context.lineTo(
+      to.x,
+      to.y
+    )
+
+    context.lineWidth = 5
+
+    context.strokeStyle =
+      'rgba(245, 222, 255, 0.42)'
+
+    context.stroke()
+
+    context.restore()
+  }
+
+  /* -------------------------------------------------------
+     COUNT SCRATCH MOVEMENT
+
+     This is the main correction.
+
+     Previous code:
+       +1 only on pointer release.
+
+     Corrected code:
+       Movement accumulates continuously.
+
+     Example:
+       65px  = 1 scratch unit
+       130px = 2 scratch units
+       325px = 5 scratch units
+
+     A continuous drag can complete
+     the entire requirement.
+  ------------------------------------------------------- */
+
+  const processScratchMovement = (
+    event:
+      ReactPointerEvent<HTMLCanvasElement>
+  ) => {
     if (
-      completedRef.current ||
       !enabled ||
-      revealed
+      revealed ||
+      finishing ||
+      completedRef.current
     ) {
       return
     }
 
-    const duration =
-      performance.now() - gestureStartTimeRef.current
+    const point =
+      getPointerPoint(event)
 
-    const validGesture =
-      gestureDistanceRef.current >=
-        MIN_GESTURE_DISTANCE &&
-      duration >= MIN_GESTURE_DURATION_MS
+    if (!point) return
 
-    if (!validGesture) return
+    const previous =
+      previousPointRef.current
 
-    completedGesturesRef.current += 1
+    if (!previous) {
+      previousPointRef.current =
+        point
+
+      return
+    }
+
+    const dx =
+      point.x - previous.x
+
+    const dy =
+      point.y - previous.y
+
+    const rawDistance =
+      Math.hypot(dx, dy)
 
     if (
-      completedGesturesRef.current >= target
+      rawDistance <
+      MIN_POINTER_MOVEMENT
+    ) {
+      return
+    }
+
+    /*
+       Ignore large pointer jumps
+       for progress calculation.
+    */
+
+    const distance =
+      Math.min(
+        rawDistance,
+        MAX_SEGMENT_DISTANCE
+      )
+
+    /*
+       Draw the visual scratch effect.
+    */
+
+    drawScratchStroke(
+      previous,
+      point
+    )
+
+    previousPointRef.current =
+      point
+
+    /*
+       Add movement to the hidden
+       scratch distance.
+    */
+
+    totalDistanceRef.current +=
+      distance
+
+    /*
+       Reveal immediately when
+       the target is reached.
+    */
+
+    if (
+      totalDistanceRef.current >=
+      requiredDistance
     ) {
       finishGame()
     }
   }
 
+  /* -------------------------------------------------------
+     START SCRATCHING
+  ------------------------------------------------------- */
+
   const startScratching = (
-    event: ReactPointerEvent<HTMLCanvasElement>
+    event:
+      ReactPointerEvent<HTMLCanvasElement>
   ) => {
     if (
       !enabled ||
@@ -819,102 +1088,135 @@ function ScratchCard({
       completedRef.current ||
       canvasUnavailable ||
       !event.isPrimary ||
-      event.button !== 0 ||
       activePointerRef.current !== null
     ) {
       return
     }
 
-    const point = getPointerPoint(event)
+    /*
+       Ignore secondary mouse buttons.
+       Touch and pen input remain allowed.
+    */
+
+    if (
+      event.pointerType === 'mouse' &&
+      event.button !== 0
+    ) {
+      return
+    }
+
+    const point =
+      getPointerPoint(event)
 
     if (!point) return
 
     event.preventDefault()
 
-    activePointerRef.current = event.pointerId
-    previousPointRef.current = point
+    activePointerRef.current =
+      event.pointerId
 
-    gestureDistanceRef.current = 0
-    gestureStartTimeRef.current = performance.now()
+    previousPointRef.current =
+      point
 
     try {
-      event.currentTarget.setPointerCapture(
-        event.pointerId
-      )
+      event.currentTarget
+        .setPointerCapture(
+          event.pointerId
+        )
     } catch {
-      // Continue where pointer capture is unavailable.
+      /*
+         Continue without pointer
+         capture if unavailable.
+      */
     }
-
-    eraseToPoint(event)
   }
 
+  /* -------------------------------------------------------
+     MOVE POINTER
+
+     Scratch progress is calculated
+     HERE, not on pointer release.
+  ------------------------------------------------------- */
+
   const moveScratching = (
-    event: ReactPointerEvent<HTMLCanvasElement>
+    event:
+      ReactPointerEvent<HTMLCanvasElement>
   ) => {
     if (
-      activePointerRef.current !== event.pointerId ||
+      activePointerRef.current !==
+        event.pointerId ||
       completedRef.current
     ) {
       return
     }
 
     event.preventDefault()
-    eraseToPoint(event)
+
+    processScratchMovement(event)
   }
 
+  /* -------------------------------------------------------
+     STOP POINTER
+
+     No additional scratch count
+     is required here.
+  ------------------------------------------------------- */
+
   const stopScratching = (
-    event: ReactPointerEvent<HTMLCanvasElement>
+    event:
+      ReactPointerEvent<HTMLCanvasElement>
   ) => {
     if (
-      activePointerRef.current !== event.pointerId
+      activePointerRef.current !==
+      event.pointerId
     ) {
       return
     }
 
-    const wasReleasedNormally =
-      event.type === 'pointerup'
-
-    if (wasReleasedNormally && !completedRef.current) {
-      eraseToPoint(event)
-      completeGesture()
+    if (
+      event.type === 'pointerup' &&
+      !completedRef.current
+    ) {
+      processScratchMovement(event)
     }
 
     activePointerRef.current = null
-    previousPointRef.current = null
 
-    gestureDistanceRef.current = 0
-    gestureStartTimeRef.current = 0
+    previousPointRef.current = null
 
     try {
       if (
-        event.currentTarget.hasPointerCapture(
-          event.pointerId
-        )
+        event.currentTarget
+          .hasPointerCapture(
+            event.pointerId
+          )
       ) {
-        event.currentTarget.releasePointerCapture(
-          event.pointerId
-        )
+        event.currentTarget
+          .releasePointerCapture(
+            event.pointerId
+          )
       }
     } catch {
-      // Pointer capture may already be released.
+      /*
+         Capture may already
+         have been released.
+      */
     }
   }
 
-  /*
-    Keyboard-accessible scratching.
+  /* -------------------------------------------------------
+     KEYBOARD ACCESSIBILITY
 
-    This control is visually hidden, so
-    the normal customer interface remains
-    free of buttons and counters.
-
-    Each activation produces a valid
-    incremental scratch gesture.
-  */
+     The keyboard button is visually
+     hidden, but remains available
+     to keyboard users.
+  ------------------------------------------------------- */
 
   const keyboardScratch = () => {
     if (
       !enabled ||
       revealed ||
+      finishing ||
       completedRef.current ||
       canvasUnavailable
     ) {
@@ -922,63 +1224,67 @@ function ScratchCard({
     }
 
     const canvas = canvasRef.current
-    const context = canvas?.getContext('2d')
 
-    if (!canvas || !context) return
+    if (!canvas) return
 
-    const nextGesture =
-      completedGesturesRef.current + 1
+    const currentUnit =
+      Math.floor(
+        totalDistanceRef.current /
+        DISTANCE_PER_SCRATCH
+      )
 
-    const columns = 6
-
-    const row = Math.floor(
-      (nextGesture - 1) / columns
-    )
+    const row =
+      Math.floor(
+        currentUnit / 6
+      )
 
     const column =
-      (nextGesture - 1) % columns
+      currentUnit % 6
 
-    const y =
-      30 +
-      (row % 6) *
-        ((canvas.height - 60) / 5)
+    const from: Point = {
+      x: 25 + column * 65,
+      y: 35 + (row % 4) * 60,
+    }
 
-    const x =
-      25 +
-      column *
-        ((canvas.width - 50) / 6)
+    const to: Point = {
+      x: Math.min(
+        SCRATCH_WIDTH - 15,
+        from.x + 65
+      ),
+      y: from.y,
+    }
 
-    context.globalCompositeOperation =
-      'destination-out'
-
-    context.lineWidth = BRUSH_SIZE
-    context.lineCap = 'round'
-
-    context.beginPath()
-    context.moveTo(x, y)
-    context.lineTo(
-      Math.min(canvas.width - 10, x + 65),
-      y
+    drawScratchStroke(
+      from,
+      to
     )
-    context.stroke()
 
-    completedGesturesRef.current += 1
+    totalDistanceRef.current +=
+      DISTANCE_PER_SCRATCH
 
     if (
-      completedGesturesRef.current >= target
+      totalDistanceRef.current >=
+      requiredDistance
     ) {
       finishGame()
     }
   }
 
-  const won = result.kind === 'win'
+  const won =
+    result.kind === 'win'
+
+  /* -------------------------------------------------------
+     RENDER
+  ------------------------------------------------------- */
 
   return (
     <div className="zg-scratch-area">
       <div
         className={[
           'zg-ticket',
-          revealed ? 'is-revealed' : '',
+          revealed
+            ? 'is-revealed'
+            : '',
           revealed
             ? won
               ? 'is-win'
@@ -986,6 +1292,8 @@ function ScratchCard({
             : '',
         ].join(' ')}
       >
+        {/* RESULT */}
+
         {revealed ? (
           <div className="zg-prize">
             <span
@@ -1042,37 +1350,65 @@ function ScratchCard({
           </div>
         )}
 
+        {/* SCRATCH SURFACE */}
+
         {!revealed && (
           <canvas
             ref={canvasRef}
             width={SCRATCH_WIDTH}
             height={SCRATCH_HEIGHT}
             className="zg-scratch-canvas"
-            aria-hidden="true"
+            aria-label="Scratch the card to reveal your surprise"
+            role="img"
             style={{
               touchAction: 'none',
+              WebkitUserSelect: 'none',
+              userSelect: 'none',
+
               pointerEvents:
                 enabled &&
                 !finishing &&
                 !canvasUnavailable
                   ? 'auto'
                   : 'none',
-              opacity: finishing ? 0 : 1,
-              transition: 'opacity 0.3s ease',
+
+              opacity:
+                finishing ? 0 : 1,
+
+              transition:
+                'opacity 0.35s ease',
+
               cursor:
-                enabled ? 'crosshair' : 'default',
+                enabled
+                  ? 'crosshair'
+                  : 'default',
             }}
-            onPointerDown={startScratching}
-            onPointerMove={moveScratching}
-            onPointerUp={stopScratching}
-            onPointerCancel={stopScratching}
-            onLostPointerCapture={stopScratching}
+            onPointerDown={
+              startScratching
+            }
+            onPointerMove={
+              moveScratching
+            }
+            onPointerUp={
+              stopScratching
+            }
+            onPointerCancel={
+              stopScratching
+            }
+            onLostPointerCapture={
+              stopScratching
+            }
             onContextMenu={event =>
+              event.preventDefault()
+            }
+            onDragStart={event =>
               event.preventDefault()
             }
           />
         )}
       </div>
+
+      {/* CUSTOMER INSTRUCTIONS */}
 
       {!revealed && (
         <div className="zg-scratch-help">
@@ -1083,6 +1419,8 @@ function ScratchCard({
                 ? 'Revealing your surprise…'
                 : 'Scratch the card to discover your surprise.'}
           </p>
+
+          {/* KEYBOARD-ONLY CONTROL */}
 
           <button
             type="button"
@@ -1100,7 +1438,8 @@ function ScratchCard({
               padding: 0,
               margin: -1,
               overflow: 'hidden',
-              clip: 'rect(0, 0, 0, 0)',
+              clip:
+                'rect(0, 0, 0, 0)',
               whiteSpace: 'nowrap',
               border: 0,
             }}
@@ -1113,29 +1452,86 @@ function ScratchCard({
   )
 }
 
-/* ==========================================
-   MAIN GAMES PAGE
-========================================== */
+/* =========================================================
+   MAIN GAME EXPERIENCE
+========================================================= */
 
 function GamesExperience() {
   const theme = useSiteTheme()
 
-  const [gameConfig, setGameConfig] =
-    useState<GameConfig>(
-      () => readGameConfig()
-    )
+  const [
+    gameConfig,
+    setGameConfig,
+  ] = useState<GameConfig>(
+    () => readGameConfig()
+  )
 
-  const [roundScratchCount, setRoundScratchCount] =
-    useState<number>(
-      () => getRequiredScratches(
+  const [
+    roundScratchCount,
+    setRoundScratchCount,
+  ] = useState<number>(
+    () =>
+      getRequiredScratches(
         readGameConfig()
       )
-    )
+  )
 
-  /*
-    Keep existing live configuration
-    synchronization.
-  */
+  const [
+    navOpen,
+    setNavOpen,
+  ] = useState(false)
+
+  const [
+    phase,
+    setPhase,
+  ] = useState<GamePhase>('intro')
+
+  const [
+    selected,
+    setSelected,
+  ] = useState<number | null>(null)
+
+  const [
+    result,
+    setResult,
+  ] = useState<GameResult | null>(null)
+
+  const [
+    round,
+    setRound,
+  ] = useState(0)
+
+  const selectionLock =
+    useRef(false)
+
+  const scratchBackRef =
+    useRef<HTMLDivElement>(null)
+
+  const replayRef =
+    useRef<HTMLButtonElement>(null)
+
+  const revealed =
+    phase === 'revealed'
+
+  const scratchEnabled =
+    phase === 'scratch'
+
+  const flipped =
+    phase === 'flipping' ||
+    phase === 'scratch' ||
+    revealed
+
+  const won =
+    revealed &&
+    result?.kind === 'win'
+
+  const lost =
+    revealed &&
+    result?.kind === 'lose'
+
+  /* -------------------------------------------------------
+     LOAD GAME CONFIGURATION
+  ------------------------------------------------------- */
 
   useEffect(() => {
     let mounted = true
@@ -1157,61 +1553,26 @@ function GamesExperience() {
       subscribeGameConfig(() => {
         if (!mounted) return
 
-        setGameConfig(readGameConfig())
+        setGameConfig(
+          readGameConfig()
+        )
       })
 
     return () => {
       mounted = false
+
       unsubscribe()
     }
   }, [])
 
-  const [navOpen, setNavOpen] =
-    useState(false)
-
-  const [phase, setPhase] =
-    useState<GamePhase>('intro')
-
-  const [selected, setSelected] =
-    useState<number | null>(null)
-
-  const [result, setResult] =
-    useState<GameResult | null>(null)
-
-  const [round, setRound] =
-    useState(0)
-
-  const selectionLock = useRef(false)
-
-  const scratchBackRef =
-    useRef<HTMLDivElement>(null)
-
-  const replayRef =
-    useRef<HTMLButtonElement>(null)
-
-  const revealed = phase === 'revealed'
-  const scratchEnabled = phase === 'scratch'
-
-  const flipped =
-    phase === 'flipping' ||
-    phase === 'scratch' ||
-    revealed
-
-  const won =
-    revealed &&
-    result?.kind === 'win'
-
-  const lost =
-    revealed &&
-    result?.kind === 'lose'
-
-  /* ========================================
+  /* -------------------------------------------------------
      CARD ANIMATION TIMING
-  ======================================== */
+  ------------------------------------------------------- */
 
   useEffect(() => {
     const reducedMotion =
-      typeof window.matchMedia === 'function' &&
+      typeof window.matchMedia ===
+        'function' &&
       window.matchMedia(
         '(prefers-reduced-motion: reduce)'
       ).matches
@@ -1229,39 +1590,48 @@ function GamesExperience() {
         next: 'spread',
         delay: 900,
       },
+
       spread: {
         next: 'choose',
         delay: 1100,
       },
+
       centering: {
         next: 'flipping',
         delay: 950,
       },
+
       flipping: {
         next: 'scratch',
         delay: 1050,
       },
     }
 
-    const transition = transitions[phase]
+    const transition =
+      transitions[phase]
 
     if (!transition) return
 
-    const timer = window.setTimeout(
-      () => setPhase(transition.next),
-      reducedMotion
-        ? 40
-        : transition.delay
-    )
+    const timer =
+      window.setTimeout(
+        () => {
+          setPhase(
+            transition.next
+          )
+        },
+        reducedMotion
+          ? 40
+          : transition.delay
+      )
 
     return () => {
       window.clearTimeout(timer)
     }
   }, [phase])
 
-  /* ========================================
+  /* -------------------------------------------------------
      ACCESSIBILITY FOCUS
-  ======================================== */
+  ------------------------------------------------------- */
 
   useEffect(() => {
     if (phase === 'scratch') {
@@ -1281,9 +1651,9 @@ function GamesExperience() {
     }
   }, [phase])
 
-  /* ========================================
+  /* -------------------------------------------------------
      MOBILE NAVIGATION
-  ======================================== */
+  ------------------------------------------------------- */
 
   useEffect(() => {
     if (!navOpen) return
@@ -1291,13 +1661,17 @@ function GamesExperience() {
     const onKeyDown = (
       event: KeyboardEvent
     ) => {
-      if (event.key === 'Escape') {
+      if (
+        event.key === 'Escape'
+      ) {
         setNavOpen(false)
       }
     }
 
     const onResize = () => {
-      if (window.innerWidth > 960) {
+      if (
+        window.innerWidth > 960
+      ) {
         setNavOpen(false)
       }
     }
@@ -1325,11 +1699,13 @@ function GamesExperience() {
     }
   }, [navOpen])
 
-  /* ========================================
-     CHOOSE ONE CARD
-  ======================================== */
+  /* -------------------------------------------------------
+     SELECT CARD
+  ------------------------------------------------------- */
 
-  const chooseCard = (index: number) => {
+  const chooseCard = (
+    index: number
+  ) => {
     if (
       phase !== 'choose' ||
       selectionLock.current ||
@@ -1338,44 +1714,59 @@ function GamesExperience() {
       return
     }
 
-    selectionLock.current = true
+    selectionLock.current =
+      true
 
-    const selectedResult = createResult(
-      index,
-      gameConfig
-    )
+    const selectedResult =
+      createResult(
+        index,
+        gameConfig
+      )
 
-    // Freeze the configured requirement
-    // for this particular game round.
+    /*
+       Freeze the scratch requirement
+       for the current game round.
+    */
+
     setRoundScratchCount(
-      getRequiredScratches(gameConfig)
+      getRequiredScratches(
+        gameConfig
+      )
     )
 
-    setResult(selectedResult)
+    setResult(
+      selectedResult
+    )
+
     setSelected(index)
-    setPhase('centering')
+
+    setPhase(
+      'centering'
+    )
   }
 
-  /* ========================================
+  /* -------------------------------------------------------
      RESET GAME
-  ======================================== */
+  ------------------------------------------------------- */
 
   const resetGame = () => {
-    selectionLock.current = false
+    selectionLock.current =
+      false
 
     setSelected(null)
+
     setResult(null)
 
-    setRound(current => current + 1)
+    setRound(
+      current => current + 1
+    )
+
     setPhase('intro')
   }
 
-  /* ========================================
+  /* -------------------------------------------------------
      REVEAL RESULT
-
-     Only ScratchCard invokes this after
-     all required gestures are completed.
-  ======================================== */
+  ------------------------------------------------------- */
 
   const revealResult = () => {
     setPhase(current =>
@@ -1407,6 +1798,10 @@ function GamesExperience() {
                   ? 'A little win. A big celebration.'
                   : 'Your next lucky moment awaits.'
 
+  /* -------------------------------------------------------
+     PAGE
+  ------------------------------------------------------- */
+
   return (
     <main
       className="zg-page"
@@ -1414,9 +1809,7 @@ function GamesExperience() {
     >
       <GamingBackground />
 
-      {/* =====================================
-          HEADER
-      ===================================== */}
+      {/* HEADER */}
 
       <header className="zg-site-header">
         <nav
@@ -1434,14 +1827,24 @@ function GamesExperience() {
             />
 
             <span>
-              <strong>ZEN CAFE</strong>
-              <small>JAFFNA</small>
+              <strong>
+                ZEN CAFE
+              </strong>
+
+              <small>
+                JAFFNA
+              </small>
             </span>
           </a>
 
+          {/* DESKTOP NAV */}
+
           <div className="zg-desktop-nav">
             {navLinks.map(
-              ({ label, href }) => (
+              ({
+                label,
+                href,
+              }) => (
                 <a
                   key={label}
                   href={href}
@@ -1461,6 +1864,8 @@ function GamesExperience() {
             </a>
           </div>
 
+          {/* NAV ACTIONS */}
+
           <div className="zg-nav-actions">
             <ThemeToggle
               className="zg-theme-toggle"
@@ -1471,16 +1876,23 @@ function GamesExperience() {
               className="zg-offers-button"
             >
               <Gift size={16} />
-              <span>Offers</span>
+
+              <span>
+                Offers
+              </span>
             </a>
 
             <button
               type="button"
               className="zg-mobile-toggle"
               onClick={() =>
-                setNavOpen(current => !current)
+                setNavOpen(
+                  current => !current
+                )
               }
-              aria-expanded={navOpen}
+              aria-expanded={
+                navOpen
+              }
               aria-controls="zg-mobile-navigation"
               aria-label={
                 navOpen
@@ -1517,6 +1929,7 @@ function GamesExperience() {
               <div className="zg-mobile-menu-head">
                 <span>
                   <Gamepad2 size={17} />
+
                   ZEN PLAY
                 </span>
 
@@ -1538,7 +1951,10 @@ function GamesExperience() {
                       }
                     >
                       <Icon size={17} />
-                      <span>{label}</span>
+
+                      <span>
+                        {label}
+                      </span>
                     </a>
                   )
                 )}
@@ -1552,7 +1968,10 @@ function GamesExperience() {
                   }
                 >
                   <Gamepad2 size={17} />
-                  <span>Games</span>
+
+                  <span>
+                    Games
+                  </span>
                 </a>
               </div>
 
@@ -1571,6 +1990,7 @@ function GamesExperience() {
                       }
                     >
                       <Icon size={15} />
+
                       {label}
                     </a>
                   )
@@ -1581,9 +2001,7 @@ function GamesExperience() {
         )}
       </header>
 
-      {/* =====================================
-          PAGE CONTENT
-      ===================================== */}
+      {/* MAIN CONTENT */}
 
       <div className="zg-container">
         {/* HERO */}
@@ -1591,14 +2009,22 @@ function GamesExperience() {
         <section className="zg-hero">
           <div className="zg-hero-badge">
             <Gamepad2 size={15} />
-            <span>ZEN LUCKY TABLE</span>
+
+            <span>
+              ZEN LUCKY TABLE
+            </span>
+
             <i aria-hidden="true" />
           </div>
 
           <h1>
             A little play.
+
             <br />
-            <em>A little possibility.</em>
+
+            <em>
+              A little possibility.
+            </em>
           </h1>
 
           <p>
@@ -1607,11 +2033,21 @@ function GamesExperience() {
           </p>
 
           <div className="zg-how-it-works">
-            <span>Choose a card</span>
+            <span>
+              Choose a card
+            </span>
+
             <i aria-hidden="true" />
-            <span>Scratch</span>
+
+            <span>
+              Scratch
+            </span>
+
             <i aria-hidden="true" />
-            <span>Discover</span>
+
+            <span>
+              Discover
+            </span>
           </div>
 
           {!gameConfig.enabled && (
@@ -1624,23 +2060,26 @@ function GamesExperience() {
                 fontWeight: 600,
               }}
             >
-              The scratch card game is temporarily
-              unavailable. Please check back later.
+              The scratch card game is
+              temporarily unavailable.
+              Please check back later.
             </p>
           )}
         </section>
 
-        {/* =====================================
-            GAME SHELL
-        ===================================== */}
+        {/* GAME SHELL */}
 
         <section
           id="game"
           className={[
             'zg-game-shell',
             `phase-${phase}`,
-            won ? 'result-win' : '',
-            lost ? 'result-lose' : '',
+            won
+              ? 'result-win'
+              : '',
+            lost
+              ? 'result-lose'
+              : '',
           ].join(' ')}
         >
           <div
@@ -1672,7 +2111,10 @@ function GamesExperience() {
               gameConfig.enabled ? (
                 <>
                   Choose your{' '}
-                  <em>winning card</em>
+
+                  <em>
+                    winning card
+                  </em>
                 </>
               ) : (
                 message
@@ -1684,14 +2126,16 @@ function GamesExperience() {
               aria-hidden="true"
             >
               <span />
-              <b>✦</b>
+
+              <b>
+                ✦
+              </b>
+
               <span />
             </div>
           </div>
 
-          {/* =================================
-              FIVE CARDS
-          ================================= */}
+          {/* FIVE CARDS */}
 
           <div className="zg-deal-stage">
             <div
@@ -1704,254 +2148,291 @@ function GamesExperience() {
               aria-hidden="true"
             />
 
-            {cards.map((card, index) => {
-              const isSelected =
-                selected === index
+            {cards.map(
+              (card, index) => {
+                const isSelected =
+                  selected === index
 
-              if (
-                selected !== null &&
-                !isSelected &&
-                phase !== 'centering'
-              ) {
-                return null
-              }
+                if (
+                  selected !== null &&
+                  !isSelected &&
+                  phase !== 'centering'
+                ) {
+                  return null
+                }
 
-              const showBack =
-                isSelected && flipped
+                const showBack =
+                  isSelected &&
+                  flipped
 
-              const canChoose =
-                phase === 'choose' &&
-                gameConfig.enabled
+                const canChoose =
+                  phase === 'choose' &&
+                  gameConfig.enabled
 
-              const cardStyle = {
-                '--card-color': card.color,
-                '--card-rgb': card.rgb,
-              } as CSSProperties
+                const cardStyle = {
+                  '--card-color':
+                    card.color,
+                  '--card-rgb':
+                    card.rgb,
+                } as CSSProperties
 
-              return (
-                <article
-                  key={`${round}-${index}`}
-                  style={cardStyle}
-                  className={[
-                    'zg-deal-card',
-                    `zg-position-${index}`,
-                    index === 2
-                      ? 'is-intro-card'
-                      : '',
-                    isSelected
-                      ? 'is-chosen'
-                      : '',
-                    selected !== null &&
-                    !isSelected
-                      ? 'is-leaving'
-                      : '',
-                  ].join(' ')}
-                  aria-hidden={
-                    phase === 'intro'
-                      ? index !== 2
-                      : selected !== null &&
-                        !isSelected
-                  }
-                >
-                  <div
-                    className="zg-card-ground-glow"
-                    aria-hidden="true"
-                  />
-
-                  <div
+                return (
+                  <article
+                    key={`${round}-${index}`}
+                    style={cardStyle}
                     className={[
-                      'zg-deal-flipper',
-                      showBack
-                        ? 'is-turned'
+                      'zg-deal-card',
+                      `zg-position-${index}`,
+                      index === 2
+                        ? 'is-intro-card'
+                        : '',
+                      isSelected
+                        ? 'is-chosen'
+                        : '',
+                      selected !== null &&
+                      !isSelected
+                        ? 'is-leaving'
                         : '',
                     ].join(' ')}
+                    aria-hidden={
+                      phase === 'intro'
+                        ? index !== 2
+                        : selected !== null &&
+                          !isSelected
+                    }
                   >
-                    {/* CARD FRONT */}
-
-                    <button
-                      type="button"
-                      className="zg-deal-front"
-                      disabled={!canChoose}
-                      tabIndex={
-                        canChoose ? 0 : -1
-                      }
-                      onClick={() =>
-                        chooseCard(index)
-                      }
-                      aria-hidden={showBack}
-                      aria-label={
-                        `Choose mystery card ${index + 1}`
-                      }
-                    >
-                      <span className="zg-photo">
-                        <span
-                          className="zg-photo-fallback"
-                          aria-hidden="true"
-                        >
-                          ✦
-                        </span>
-
-                        <img
-                          src={card.image}
-                          alt=""
-                          draggable={false}
-                          style={{
-                            objectPosition:
-                              card.position,
-                          }}
-                          onError={event => {
-                            event.currentTarget.style.display =
-                              'none'
-                          }}
-                        />
-                      </span>
-                    </button>
-
-                    {/* CARD BACK */}
+                    <div
+                      className="zg-card-ground-glow"
+                      aria-hidden="true"
+                    />
 
                     <div
-                      ref={
-                        isSelected
-                          ? scratchBackRef
-                          : undefined
-                      }
-                      className="zg-deal-back"
-                      aria-hidden={
-                        !scratchEnabled &&
-                        !revealed
-                      }
+                      className={[
+                        'zg-deal-flipper',
+                        showBack
+                          ? 'is-turned'
+                          : '',
+                      ].join(' ')}
                     >
-                      {isSelected &&
-                        result && (
-                          <>
-                            <span
-                              className="zg-back-emblem"
-                              aria-hidden="true"
-                            >
-                              {revealed && !won
-                                ? '♡'
-                                : '✦'}
-                            </span>
+                      {/* CARD FRONT */}
 
-                            <span className="zg-eyebrow">
-                              {revealed
-                                ? won
-                                  ? 'LUCK LOOKS GOOD ON YOU'
-                                  : 'ANOTHER CHANCE AWAITS'
-                                : 'YOUR LITTLE ZEN SURPRISE'}
-                            </span>
+                      <button
+                        type="button"
+                        className="zg-deal-front"
+                        disabled={
+                          !canChoose
+                        }
+                        tabIndex={
+                          canChoose
+                            ? 0
+                            : -1
+                        }
+                        aria-hidden={
+                          showBack
+                        }
+                        aria-label={
+                          `Choose mystery card ${index + 1}`
+                        }
+                        onClick={() =>
+                          chooseCard(
+                            index
+                          )
+                        }
+                      >
+                        <span className="zg-photo">
+                          <span
+                            className="zg-photo-fallback"
+                            aria-hidden="true"
+                          >
+                            ✦
+                          </span>
 
-                            <h3>
-                              {revealed
-                                ? won
-                                  ? 'Lucky you!'
-                                  : 'Good Luck Next Time!'
-                                : 'Scratch & discover.'}
-                            </h3>
-
-                            <ScratchCard
-                              key={`scratch-${round}`}
-                              result={result}
-                              enabled={scratchEnabled}
-                              revealed={revealed}
-                              requiredScratches={
-                                roundScratchCount
+                          <img
+                            src={
+                              card.image
+                            }
+                            alt=""
+                            draggable={
+                              false
+                            }
+                            style={{
+                              objectPosition:
+                                card.position,
+                            }}
+                            onError={
+                              event => {
+                                event.currentTarget.style.display =
+                                  'none'
                               }
-                              onReveal={
-                                revealResult
-                              }
-                            />
+                            }
+                          />
+                        </span>
+                      </button>
 
-                            <span className="zg-back-signature">
-                              with love,
-                              Zen Café
-                            </span>
-                          </>
-                        )}
+                      {/* CARD BACK */}
+
+                      <div
+                        ref={
+                          isSelected
+                            ? scratchBackRef
+                            : undefined
+                        }
+                        className="zg-deal-back"
+                        aria-hidden={
+                          !scratchEnabled &&
+                          !revealed
+                        }
+                      >
+                        {isSelected &&
+                          result && (
+                            <>
+                              <span
+                                className="zg-back-emblem"
+                                aria-hidden="true"
+                              >
+                                {revealed &&
+                                !won
+                                  ? '♡'
+                                  : '✦'}
+                              </span>
+
+                              <span className="zg-eyebrow">
+                                {revealed
+                                  ? won
+                                    ? 'LUCK LOOKS GOOD ON YOU'
+                                    : 'ANOTHER CHANCE AWAITS'
+                                  : 'YOUR LITTLE ZEN SURPRISE'}
+                              </span>
+
+                              <h3>
+                                {revealed
+                                  ? won
+                                    ? 'Lucky you!'
+                                    : 'Good Luck Next Time!'
+                                  : 'Scratch & discover.'}
+                              </h3>
+
+                              <ScratchCard
+                                key={`scratch-${round}`}
+                                result={
+                                  result
+                                }
+                                enabled={
+                                  scratchEnabled
+                                }
+                                revealed={
+                                  revealed
+                                }
+                                requiredScratches={
+                                  roundScratchCount
+                                }
+                                onReveal={
+                                  revealResult
+                                }
+                              />
+
+                              <span className="zg-back-signature">
+                                with love,
+                                Zen Café
+                              </span>
+                            </>
+                          )}
+                      </div>
                     </div>
-                  </div>
-                </article>
-              )
-            })}
+                  </article>
+                )
+              }
+            )}
           </div>
 
-          {/* =================================
-              RESULT CAPTION
-          ================================= */}
+          {/* RESULT CAPTION */}
 
           <div className="zg-stage-caption">
             {scratchEnabled && (
               <p>
-                Scratch the card to discover
-                your little surprise.
+                Scratch the card to
+                discover your little
+                surprise.
               </p>
             )}
 
-            {revealed && result && (
-              <div
-                className={[
-                  'zg-result-message',
-                  result.kind === 'win'
-                    ? 'is-win'
-                    : 'is-lose',
-                ].join(' ')}
-                role="status"
-                aria-live="polite"
-                aria-atomic="true"
-              >
-                <span
-                  className="zg-result-reaction"
-                  aria-hidden="true"
+            {revealed &&
+              result && (
+                <div
+                  className={[
+                    'zg-result-message',
+                    result.kind ===
+                    'win'
+                      ? 'is-win'
+                      : 'is-lose',
+                  ].join(' ')}
+                  role="status"
+                  aria-live="polite"
+                  aria-atomic="true"
                 >
-                  {result.kind === 'win'
-                    ? '🥳'
-                    : '🥺'}
-                </span>
+                  <span
+                    className="zg-result-reaction"
+                    aria-hidden="true"
+                  >
+                    {result.kind ===
+                    'win'
+                      ? '🥳'
+                      : '🥺'}
+                  </span>
 
-                <strong>
-                  {result.kind === 'win'
-                    ? `Hooray! You won ${result.offer.title.toLowerCase()}!`
-                    : 'Good Luck Next Time!'}
-                </strong>
+                  <strong>
+                    {result.kind ===
+                    'win'
+                      ? `Hooray! You won ${result.offer.title.toLowerCase()}!`
+                      : 'Good Luck Next Time!'}
+                  </strong>
 
-                <p>
-                  {result.kind === 'win'
-                    ? 'A little luck. A lovely reason to smile.'
-                    : 'Your next lucky moment could be one card away.'}
-                </p>
+                  <p>
+                    {result.kind ===
+                    'win'
+                      ? 'A little luck. A lovely reason to smile.'
+                      : 'Your next lucky moment could be one card away.'}
+                  </p>
 
-                <span className="zg-result-note">
-                  {result.kind === 'win'
-                    ? 'Demo reward — not a redeemable voucher.'
-                    : 'Demo game — a fresh chance awaits each round.'}
-                </span>
+                  <span className="zg-result-note">
+                    {result.kind ===
+                    'win'
+                      ? 'Demo reward — not a redeemable voucher.'
+                      : 'Demo game — a fresh chance awaits each round.'}
+                  </span>
 
-                <button
-                  ref={replayRef}
-                  type="button"
-                  className="zg-reset"
-                  onClick={resetGame}
-                >
-                  {result.kind === 'win'
-                    ? 'Play again ↻'
-                    : 'Try my luck again ↻'}
-                </button>
-              </div>
-            )}
+                  <button
+                    ref={replayRef}
+                    type="button"
+                    className="zg-reset"
+                    onClick={
+                      resetGame
+                    }
+                  >
+                    {result.kind ===
+                    'win'
+                      ? 'Play again ↻'
+                      : 'Try my luck again ↻'}
+                  </button>
+                </div>
+              )}
           </div>
         </section>
 
-        {/* =====================================
-            FOOTER
-        ===================================== */}
+        {/* FOOTER */}
 
         <footer className="zg-footer">
           <div className="zg-footer-brand">
             <Sparkles size={20} />
 
             <span>
-              <strong>ZEN CAFE</strong>
-              <small>JAFFNA</small>
+              <strong>
+                ZEN CAFE
+              </strong>
+
+              <small>
+                JAFFNA
+              </small>
             </span>
           </div>
 
@@ -1969,9 +2450,9 @@ function GamesExperience() {
   )
 }
 
-/* ==========================================
-   MOUNT REACT APPLICATION
-========================================== */
+/* =========================================================
+   REACT ENTRY
+========================================================= */
 
 const rootElement =
   document.getElementById('root')
@@ -1983,5 +2464,7 @@ if (!rootElement) {
 }
 
 createRoot(rootElement).render(
-  React.createElement(GamesExperience)
+  React.createElement(
+    GamesExperience
+  )
 )
